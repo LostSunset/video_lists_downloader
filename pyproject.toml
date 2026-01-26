@@ -1,0 +1,35 @@
+[project]
+name = "video-downloader-pyside6"
+version = "0.1.9"
+description = "影片批量下載工具 - 支援 YouTube 與 Bilibili 平台"
+readme = "README_PyQt6.md"
+requires-python = ">=3.14"
+dependencies = [
+    "PySide6>=6.10.0",
+    "yt-dlp>=2025.12.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+]
+
+[project.scripts]
+video-downloader = "video_downloader_pyside6_v0.1.9:main"
+
+[tool.uv]
+python = "3.14"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.14"
+warn_return_any = true
+warn_unused_ignores = true
