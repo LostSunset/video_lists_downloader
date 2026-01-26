@@ -1,8 +1,18 @@
 # Video Lists Downloader
 
+[![CI](https://github.com/LostSunset/video_lists_downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/LostSunset/video_lists_downloader/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+
 影片批量下載工具 - 支援 YouTube 與 Bilibili 平台
 
-## 功能特色
+[English](#english) | [中文](#中文)
+
+---
+
+## 中文
+
+### 功能特色
 
 - 🎬 支援 YouTube 和 Bilibili 影片/播放清單下載
 - 📊 下載進度追蹤與歷史記錄
@@ -13,38 +23,112 @@
 - 📈 下載統計功能
 - 💾 設定匯出/匯入功能
 
-## 環境需求
+### 截圖
 
-- Python 3.8+
+<!-- TODO: 添加應用程式截圖 -->
+<!-- ![主介面](docs/images/main.png) -->
+
+### 環境需求
+
+- Python 3.10+
 - PySide6
 - yt-dlp (用於下載)
-- ffmpeg (用於合併影片)
+- ffmpeg (用於合併影片，可選)
 
-## 安裝
+### 安裝
 
 ```bash
+# 使用 pip
 pip install PySide6 yt-dlp
+
+# 或使用 uv (推薦)
+uv sync
 ```
 
-## 使用方式
+### 使用方式
 
 ```bash
-python video_downloader_pyside6_v0.2.0.py
+python video_downloader.py
 ```
 
-## 版本歷史
+### 開發
+
+```bash
+# 安裝開發依賴
+pip install -e ".[dev]"
+
+# 執行測試
+pytest
+
+# 程式碼檢查
+ruff check .
+```
+
+---
+
+## English
+
+### Features
+
+- 🎬 Support YouTube and Bilibili video/playlist downloads
+- 📊 Download progress tracking and history
+- 🎨 Dark/Light theme switching
+- 🔔 System tray and download completion notifications
+- ⚡ Download speed limit
+- 🔄 Auto-retry mechanism
+- 📈 Download statistics
+- 💾 Settings export/import
+
+### Requirements
+
+- Python 3.10+
+- PySide6
+- yt-dlp (for downloading)
+- ffmpeg (for merging, optional)
+
+### Installation
+
+```bash
+# Using pip
+pip install PySide6 yt-dlp
+
+# Or using uv (recommended)
+uv sync
+```
+
+### Usage
+
+```bash
+python video_downloader.py
+```
+
+### Development
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Lint
+ruff check .
+```
+
+---
+
+## 版本歷史 | Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for full history.
 
 ### v0.2.0 (2026-01-26)
-- 移除未使用的 import 與空類別
-- 預編譯正規表達式提升效能
-- 新增下載速度限制功能
-- 新增自動重試機制
-- 新增系統托盤支援
-- 新增下載完成通知
-- 新增深色/淺色主題切換
-- 新增下載統計功能
-- 新增設定匯出/匯入功能
+- 新增下載速度限制、自動重試、系統托盤、主題切換等功能
+- 從 PyQt6 遷移到 PySide6
 
-## 授權
+## 貢獻 | Contributing
 
-MIT License
+See [CONTRIBUTING.md](CONTRIBUTING.md)
+
+## 授權 | License
+
+[MIT License](LICENSE)

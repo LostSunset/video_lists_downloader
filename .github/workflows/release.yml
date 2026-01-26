@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest tests/ -v
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## 變更內容
+            
+            請參閱 [CHANGELOG.md](https://github.com/LostSunset/video_lists_downloader/blob/main/CHANGELOG.md) 了解詳細變更。
+            
+            ## 安裝方式
+            
+            ```bash
+            pip install PySide6 yt-dlp
+            python video_downloader.py
+            ```
+          draft: false
+          prerelease: false
+          files: |
+            video_downloader.py
+            LICENSE

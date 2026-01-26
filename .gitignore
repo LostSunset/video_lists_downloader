@@ -25,6 +25,7 @@ venv/
 ENV/
 env/
 .venv/
+.venv*/
 
 # IDE
 .idea/
@@ -37,10 +38,13 @@ download_history.json
 playlist_state.json
 playlist_updates_log.json
 
-# Old versions (keep in old_version folder)
+# Old versions folder (keep locally, don't upload)
+old_version/
 video_downloader_pyqt_v*.py
+video_downloader_pyqt.py
 video_downloader_pyside6_v*.py
-!video_downloader_pyside6_v0.2.0.py
+影片批量下載工具_v*.py
+README_PyQt6.md
 
 # OS
 .DS_Store
