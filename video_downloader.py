@@ -1,7 +1,7 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-影片批量下載工具 v0.2.0 (PySide6 版本)
+影片批量下載工具 v0.2.1 (PySide6 版本)
 支援 YouTube 與 Bilibili 平台
 
 v0.2.0 更新內容:
@@ -45,7 +45,7 @@ from PySide6.QtGui import (
 )
 
 
-APP_VERSION = "v0.2.0"
+APP_VERSION = "v0.2.1"
 
 
 # ==================== 常數定義 ====================

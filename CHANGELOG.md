@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-01-27
+
+### Added
+- GitHub Actions CI/CD 自動測試和發布
+- pytest 單元測試框架
+- MIT LICENSE 授權檔案
+- CONTRIBUTING.md 貢獻指南
+- CHANGELOG.md 變更日誌
+- 雙語 README（中文/英文）
+
+### Changed
+- 主程式重命名為 `video_downloader.py`
+- 改進專案結構和文件
+- 修復測試以匹配實際程式碼結構
+
 ## [0.2.0] - 2026-01-26
 
 ### Added
