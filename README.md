@@ -132,6 +132,10 @@ See [CHANGELOG.md](CHANGELOG.md) for full history.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md)
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=LostSunset/video_lists_downloader&type=Date)](https://star-history.com/#LostSunset/video_lists_downloader&Date)
+
 ## 授權 | License
 
 [MIT License](LICENSE)
