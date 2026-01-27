@@ -3,6 +3,9 @@
 [![CI](https://github.com/LostSunset/video_lists_downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/LostSunset/video_lists_downloader/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![GitHub stars](https://img.shields.io/github/stars/LostSunset/video_lists_downloader?style=social)](https://github.com/LostSunset/video_lists_downloader/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/LostSunset/video_lists_downloader?style=social)](https://github.com/LostSunset/video_lists_downloader/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/LostSunset/video_lists_downloader)](https://github.com/LostSunset/video_lists_downloader/issues)
 
 影片批量下載工具 - 支援 YouTube 與 Bilibili 平台
 
