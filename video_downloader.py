@@ -15,6 +15,8 @@ v0.2.0 更新內容:
 - 新增設定匯出/匯入功能
 """
 
+from __future__ import annotations
+
 import datetime
 import glob
 import json
