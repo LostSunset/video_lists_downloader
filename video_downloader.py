@@ -31,7 +31,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from PySide6.QtCore import QObject, QSettings, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QFont
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -58,7 +58,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.2.1"
+APP_VERSION = "v0.3.0"
+
+
+# ==================== 狀態顏色定義 ====================
+@dataclass
+class StatusColors:
+    """狀態顏色常數"""
+
+    SUCCESS: str = "#4CAF50"  # 綠色 - 成功
+    FAILED: str = "#F44336"  # 紅色 - 失敗
+    SKIPPED: str = "#FFC107"  # 黃色 - 跳過
+    PENDING: str = "#9E9E9E"  # 灰色 - 等待中
+    RUNNING: str = "#2196F3"  # 藍色 - 進行中
+    VALID: str = "#4CAF50"  # 綠色 - 有效
+    INVALID: str = "#F44336"  # 紅色 - 無效
+    UNKNOWN: str = "#FFC107"  # 黃色 - 未驗證
+
+
+STATUS_COLORS = StatusColors()
 
 
 # ==================== 常數定義 ====================
@@ -830,6 +848,9 @@ class MainWindow(QMainWindow):
         return os.path.normcase(os.path.abspath(os.path.normpath(path)))
 
     def init_ui(self):
+        # 啟用拖放
+        self.setAcceptDrops(True)
+
         self.create_toolbar()
 
         central_widget = QWidget()
@@ -851,6 +872,87 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("就緒")
         self.apply_stylesheet()
 
+        # 設定鍵盤快捷鍵
+        self.setup_shortcuts()
+
+        # 初始化最近路徑列表
+        self.recent_paths: list[str] = []
+
+    def setup_shortcuts(self):
+        """設定鍵盤快捷鍵"""
+        # Ctrl+Enter: 開始下載
+        shortcut_start = QShortcut(QKeySequence("Ctrl+Return"), self)
+        shortcut_start.activated.connect(self.start_download)
+
+        # Ctrl+V: 快速貼上 URL
+        shortcut_paste = QShortcut(QKeySequence("Ctrl+Shift+V"), self)
+        shortcut_paste.activated.connect(self.quick_paste_url)
+
+        # F1: 顯示說明
+        shortcut_help = QShortcut(QKeySequence("F1"), self)
+        shortcut_help.activated.connect(self.show_help)
+
+        # Ctrl+Q: 退出
+        shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
+        shortcut_quit.activated.connect(self.close)
+
+        # Ctrl+O: 選擇下載路徑
+        shortcut_open = QShortcut(QKeySequence("Ctrl+O"), self)
+        shortcut_open.activated.connect(self.browse_download_path)
+
+    def quick_paste_url(self):
+        """快速貼上 URL 到當前選中的輸入框"""
+        clipboard = QApplication.clipboard()
+        text = clipboard.text().strip()
+        if text:
+            # 自動偵測並填入對應輸入框
+            if "list=" in text or "playlist" in text.lower():
+                self.playlist_url_edit.setText(text)
+                self.playlist_radio.setChecked(True)
+            else:
+                self.single_url_edit.setText(text)
+                self.single_radio.setChecked(True)
+            self.log_to_overview(f"📋 已貼上 URL: {text[:50]}...")
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """處理拖入事件"""
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        """處理放下事件"""
+        mime_data = event.mimeData()
+
+        if mime_data.hasUrls():
+            urls = mime_data.urls()
+            for url in urls:
+                if url.isLocalFile():
+                    # 本地檔案 (可能是 txt)
+                    file_path = url.toLocalFile()
+                    if file_path.endswith(".txt"):
+                        self.file_path_edit.setText(file_path)
+                        self.file_radio.setChecked(True)
+                        self.log_to_overview(f"📁 已拖入檔案: {file_path}")
+                else:
+                    # 網址
+                    url_str = url.toString()
+                    self._handle_dropped_url(url_str)
+        elif mime_data.hasText():
+            text = mime_data.text().strip()
+            self._handle_dropped_url(text)
+
+    def _handle_dropped_url(self, url: str):
+        """處理拖入的 URL"""
+        if not url:
+            return
+        if "list=" in url or "playlist" in url.lower():
+            self.playlist_url_edit.setText(url)
+            self.playlist_radio.setChecked(True)
+        else:
+            self.single_url_edit.setText(url)
+            self.single_radio.setChecked(True)
+        self.log_to_overview(f"🔗 已拖入 URL: {url[:50]}...")
+
     def create_toolbar(self):
         toolbar = QToolBar("主工具列")
         toolbar.setMovable(False)
@@ -871,8 +973,14 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        help_action = QAction(" 說明", self)
+        export_action = QAction("📊 匯出報告", self)
+        export_action.triggered.connect(self.export_download_report)
+        export_action.setToolTip("匯出下載歷史報告 (CSV/HTML)")
+        toolbar.addAction(export_action)
+
+        help_action = QAction("❓ 說明", self)
         help_action.triggered.connect(self.show_help)
+        help_action.setToolTip("顯示使用說明 (F1)")
         toolbar.addAction(help_action)
 
     def create_left_panel(self) -> QWidget:
@@ -924,51 +1032,84 @@ class MainWindow(QMainWindow):
 
     def create_input_group(self) -> QGroupBox:
         group = QGroupBox("輸入模式")
+        group.setToolTip("選擇輸入方式：單一影片、播放清單或網址清單檔案\n💡 提示：可直接拖放 URL 或 .txt 檔案到視窗")
         layout = QVBoxLayout()
 
+        # 拖放提示
+        drop_hint = QLabel("💡 支援拖放 URL 或 .txt 檔案")
+        drop_hint.setStyleSheet("color: #888; font-size: 11px; margin-bottom: 5px;")
+        layout.addWidget(drop_hint)
+
         self.single_radio = QRadioButton("單一影片")
+        self.single_radio.setToolTip("下載單一影片")
         layout.addWidget(self.single_radio)
 
         self.single_url_edit = QLineEdit()
         self.single_url_edit.setPlaceholderText("輸入影片網址...")
+        self.single_url_edit.setToolTip("可輸入 YouTube 或 Bilibili 影片網址")
+        self.single_url_edit.textChanged.connect(self._on_single_url_changed)
         layout.addWidget(self.single_url_edit)
 
         self.playlist_radio = QRadioButton("播放清單")
         self.playlist_radio.setChecked(True)
+        self.playlist_radio.setToolTip("下載整個播放清單")
         layout.addWidget(self.playlist_radio)
 
         self.playlist_url_edit = QLineEdit()
         self.playlist_url_edit.setPlaceholderText("輸入播放清單網址...")
+        self.playlist_url_edit.setToolTip("輸入含有 list= 參數的 YouTube 播放清單網址")
+        self.playlist_url_edit.textChanged.connect(self._on_playlist_url_changed)
         layout.addWidget(self.playlist_url_edit)
 
         self.file_radio = QRadioButton("網址清單檔案")
+        self.file_radio.setToolTip("從 .txt 檔案載入多個網址")
         layout.addWidget(self.file_radio)
 
         file_layout = QHBoxLayout()
         self.file_path_edit = QLineEdit()
         self.file_path_edit.setPlaceholderText("選擇網址清單檔案...")
         self.file_path_edit.setReadOnly(True)
+        self.file_path_edit.setToolTip("每行一個 URL 的文字檔案")
         file_layout.addWidget(self.file_path_edit)
 
         browse_btn = QPushButton("瀏覽")
         browse_btn.clicked.connect(self.browse_url_file)
+        browse_btn.setToolTip("選擇 .txt 檔案 (快捷鍵: Ctrl+O 選擇路徑)")
         file_layout.addWidget(browse_btn)
         layout.addLayout(file_layout)
 
         group.setLayout(layout)
         return group
 
+    def _on_single_url_changed(self, text: str):
+        """當單一影片 URL 變更時自動偵測類型"""
+        if text.strip():
+            self.single_radio.setChecked(True)
+            # 如果是播放清單 URL，自動切換
+            if "list=" in text:
+                self.playlist_url_edit.setText(text)
+                self.playlist_radio.setChecked(True)
+                self.single_url_edit.clear()
+
+    def _on_playlist_url_changed(self, text: str):
+        """當播放清單 URL 變更時自動選擇"""
+        if text.strip():
+            self.playlist_radio.setChecked(True)
+
     def create_path_group(self) -> QGroupBox:
         group = QGroupBox("下載路徑")
+        group.setToolTip("設定影片下載的目標資料夾")
         layout = QHBoxLayout()
 
         self.download_path_edit = QLineEdit()
         self.download_path_edit.setPlaceholderText("選擇下載資料夾...")
         self.download_path_edit.setReadOnly(True)
+        self.download_path_edit.setToolTip("影片將下載至此資料夾\n快捷鍵: Ctrl+O")
         layout.addWidget(self.download_path_edit)
 
         browse_btn = QPushButton("瀏覽")
         browse_btn.clicked.connect(self.browse_download_path)
+        browse_btn.setToolTip("選擇下載目標資料夾 (Ctrl+O)")
         layout.addWidget(browse_btn)
 
         group.setLayout(layout)
@@ -976,11 +1117,13 @@ class MainWindow(QMainWindow):
 
     def create_download_settings_group(self) -> QGroupBox:
         group = QGroupBox("下載設定")
+        group.setToolTip("設定下載畫質、超時時間與檔名格式")
         layout = QFormLayout()
 
         self.quality_combo = QComboBox()
         self.quality_combo.addItems(CONSTANTS.QUALITY_OPTIONS)
         self.quality_combo.setCurrentText("best")
+        self.quality_combo.setToolTip("選擇下載畫質\nbest: 最高畫質\nworst: 最低畫質\n其他: 指定解析度上限")
         layout.addRow("畫質:", self.quality_combo)
 
         timeout_layout = QHBoxLayout()
@@ -990,28 +1133,42 @@ class MainWindow(QMainWindow):
         self.timeout_spin.setValue(CONSTANTS.DEFAULT_TIMEOUT)
         self.timeout_spin.setSuffix(" 秒")
         self.timeout_spin.setSpecialValueText("不限時")
+        self.timeout_spin.setToolTip("設定單一影片下載超時時間\n0 表示不限時\n建議長影片設定較長時間")
         timeout_layout.addWidget(self.timeout_spin)
         timeout_layout.addStretch()
         layout.addRow("下載超時:", timeout_layout)
 
         self.debug_mode_check = QCheckBox("除錯模式")
+        self.debug_mode_check.setToolTip("顯示詳細的下載資訊與錯誤訊息")
         layout.addRow("", self.debug_mode_check)
 
         self.custom_filename_check = QCheckBox("使用自訂檔名模板")
+        self.custom_filename_check.setToolTip("啟用後可自訂下載檔案的命名規則")
         layout.addRow("", self.custom_filename_check)
 
         self.custom_filename_edit = QLineEdit("%(title)s [%(id)s]")
+        self.custom_filename_edit.setToolTip(
+            "檔名模板變數說明：\n"
+            "%(title)s - 影片標題\n"
+            "%(id)s - 影片 ID\n"
+            "%(uploader)s - 上傳者名稱\n"
+            "%(upload_date)s - 上傳日期\n"
+            "%(duration)s - 影片長度\n"
+            "%(resolution)s - 解析度"
+        )
         layout.addRow("檔名模板:", self.custom_filename_edit)
 
         trim_layout = QHBoxLayout()
         self.auto_trim_filename_check = QCheckBox("自動縮短過長檔名")
         self.auto_trim_filename_check.setChecked(True)
+        self.auto_trim_filename_check.setToolTip("自動截斷過長的檔案名稱\n避免因檔名過長導致的儲存錯誤")
         trim_layout.addWidget(self.auto_trim_filename_check)
 
         self.trim_filename_spin = QSpinBox()
         self.trim_filename_spin.setRange(20, 200)
         self.trim_filename_spin.setValue(120)
         self.trim_filename_spin.setSuffix(" 字元")
+        self.trim_filename_spin.setToolTip("檔名最大長度限制")
         trim_layout.addWidget(self.trim_filename_spin)
         trim_layout.addStretch()
 
@@ -1023,65 +1180,107 @@ class MainWindow(QMainWindow):
 
     def create_cookie_group(self) -> QGroupBox:
         group = QGroupBox("Cookie 設定")
+        group.setToolTip("Cookie 用於下載會員限定影片\n需先在瀏覽器登入後提取")
         layout = QVBoxLayout()
 
+        # YouTube Cookie
         youtube_layout = QHBoxLayout()
+        self.youtube_status_label = QLabel("🟡")
+        self.youtube_status_label.setToolTip("Cookie 狀態：未驗證")
+        self.youtube_status_label.setFixedWidth(20)
+        youtube_layout.addWidget(self.youtube_status_label)
         youtube_layout.addWidget(QLabel("YouTube:"))
+
         self.youtube_cookie_edit = QLineEdit()
         self.youtube_cookie_edit.setPlaceholderText("YouTube Cookie 檔案...")
         self.youtube_cookie_edit.setReadOnly(True)
+        self.youtube_cookie_edit.setToolTip("從 Firefox 瀏覽器提取的 Cookie 檔案")
         youtube_layout.addWidget(self.youtube_cookie_edit)
 
         youtube_extract_btn = QPushButton("提取")
         youtube_extract_btn.clicked.connect(lambda: self.extract_cookies("youtube"))
+        youtube_extract_btn.setToolTip("從 Firefox 自動提取登入 Cookie\n需先登入 YouTube")
         youtube_layout.addWidget(youtube_extract_btn)
 
         youtube_test_btn = QPushButton("測試")
         youtube_test_btn.clicked.connect(lambda: self.test_cookies("youtube"))
+        youtube_test_btn.setToolTip("驗證 Cookie 是否有效")
         youtube_layout.addWidget(youtube_test_btn)
         layout.addLayout(youtube_layout)
 
+        # Bilibili Cookie
         bilibili_layout = QHBoxLayout()
+        self.bilibili_status_label = QLabel("🟡")
+        self.bilibili_status_label.setToolTip("Cookie 狀態：未驗證")
+        self.bilibili_status_label.setFixedWidth(20)
+        bilibili_layout.addWidget(self.bilibili_status_label)
         bilibili_layout.addWidget(QLabel("Bilibili:"))
+
         self.bilibili_cookie_edit = QLineEdit()
         self.bilibili_cookie_edit.setPlaceholderText("Bilibili Cookie 檔案...")
         self.bilibili_cookie_edit.setReadOnly(True)
+        self.bilibili_cookie_edit.setToolTip("從 Firefox 瀏覽器提取的 Cookie 檔案")
         bilibili_layout.addWidget(self.bilibili_cookie_edit)
 
         bilibili_extract_btn = QPushButton("提取")
         bilibili_extract_btn.clicked.connect(lambda: self.extract_cookies("bilibili"))
+        bilibili_extract_btn.setToolTip("從 Firefox 自動提取登入 Cookie\n需先登入 Bilibili")
         bilibili_layout.addWidget(bilibili_extract_btn)
 
         bilibili_test_btn = QPushButton("測試")
         bilibili_test_btn.clicked.connect(lambda: self.test_cookies("bilibili"))
+        bilibili_test_btn.setToolTip("驗證 Cookie 是否有效")
         bilibili_layout.addWidget(bilibili_test_btn)
         layout.addLayout(bilibili_layout)
 
         self.use_cookies_check = QCheckBox("啟用 Cookies (會員影片)")
         self.use_cookies_check.setChecked(True)
+        self.use_cookies_check.setToolTip("啟用後可下載需要登入的會員限定影片")
         layout.addWidget(self.use_cookies_check)
 
         group.setLayout(layout)
         return group
 
+    def update_cookie_status(self, platform: str, is_valid: bool | None):
+        """更新 Cookie 狀態指示器"""
+        if platform == "youtube":
+            label = self.youtube_status_label
+        else:
+            label = self.bilibili_status_label
+
+        if is_valid is None:
+            label.setText("🟡")
+            label.setToolTip("Cookie 狀態：未驗證")
+        elif is_valid:
+            label.setText("🟢")
+            label.setToolTip("Cookie 狀態：有效")
+        else:
+            label.setText("🔴")
+            label.setToolTip("Cookie 狀態：無效或已過期")
+
     def create_subtitle_group(self) -> QGroupBox:
         group = QGroupBox("字幕設定")
+        group.setToolTip("設定字幕下載選項")
         layout = QVBoxLayout()
 
         self.download_subtitle_check = QCheckBox("下載字幕")
         self.download_subtitle_check.setChecked(True)
+        self.download_subtitle_check.setToolTip("下載影片的字幕檔案 (若有提供)")
         layout.addWidget(self.download_subtitle_check)
 
         self.auto_subtitle_check = QCheckBox("下載自動生成字幕")
         self.auto_subtitle_check.setChecked(True)
+        self.auto_subtitle_check.setToolTip("下載 YouTube 自動生成的字幕\n適用於沒有手動字幕的影片")
         layout.addWidget(self.auto_subtitle_check)
 
         self.subtitle_only_check = QCheckBox("僅下載字幕")
+        self.subtitle_only_check.setToolTip("只下載字幕檔案，不下載影片")
         layout.addWidget(self.subtitle_only_check)
 
         lang_layout = QHBoxLayout()
         lang_layout.addWidget(QLabel("語言:"))
         self.subtitle_lang_edit = QLineEdit("zh-TW,zh,en")
+        self.subtitle_lang_edit.setToolTip("指定下載的字幕語言\n多個語言用逗號分隔\n例如: zh-TW,zh,en,ja")
         lang_layout.addWidget(self.subtitle_lang_edit)
         layout.addLayout(lang_layout)
 
@@ -1209,29 +1408,33 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "失敗", f"Cookie 提取失敗\n\n{message}")
 
     def test_cookies(self, platform: str):
-        self.log_to_overview(f" 測試 {platform.upper()} Cookies...")
+        self.log_to_overview(f"🔍 測試 {platform.upper()} Cookies...")
         if platform == "youtube":
             if not self.youtube_cookie_file:
                 QMessageBox.warning(self, "警告", "請先提取 YouTube Cookies")
+                self.update_cookie_status("youtube", None)
                 return
             valid, message = self.cookie_manager.validate_youtube_cookies(self.youtube_cookie_file)
+            self.update_cookie_status("youtube", valid)
             if valid:
-                self.log_to_overview(" YouTube Cookies 有效")
+                self.log_to_overview("✅ YouTube Cookies 有效")
                 QMessageBox.information(self, "成功", "YouTube Cookies 有效且可用！")
             else:
-                self.log_to_overview(f" YouTube Cookies 無效: {message}")
+                self.log_to_overview(f"❌ YouTube Cookies 無效: {message}")
                 QMessageBox.warning(self, "失敗", f"YouTube Cookies 無效\n{message}")
         elif platform == "bilibili":
             if not self.bilibili_cookie_file:
                 QMessageBox.warning(self, "警告", "請先提取 Bilibili Cookies")
+                self.update_cookie_status("bilibili", None)
                 return
             valid, info = self.cookie_manager.validate_bilibili_cookies(self.bilibili_cookie_file)
+            self.update_cookie_status("bilibili", valid)
             if valid:
-                self.log_to_overview(" Bilibili Cookies 有效")
+                self.log_to_overview("✅ Bilibili Cookies 有效")
                 QMessageBox.information(self, "成功", "Bilibili Cookies 有效且可用！")
             else:
                 error = info.get("error", "未知錯誤")
-                self.log_to_overview(f" Bilibili Cookies 無效: {error}")
+                self.log_to_overview(f"❌ Bilibili Cookies 無效: {error}")
                 QMessageBox.warning(self, "失敗", f"Bilibili Cookies 無效\n{error}")
 
     def start_download(self):
@@ -1568,18 +1771,151 @@ class MainWindow(QMainWindow):
         threading.Thread(target=check, daemon=True).start()
 
     def show_help(self):
-        help_text = f"""影片批量下載工具使用說明
+        help_text = f"""📺 影片批量下載工具 {APP_VERSION} - 使用說明
 
-1. 選擇平台 (YouTube/Bilibili)
-2. 輸入影片網址或播放清單
-3. 選擇下載路徑
-4. 設定畫質與字幕選項
-5. 如需下載會員影片,請先提取 Cookies
-6. 點擊「開始下載」
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 快速入門
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. 選擇下載路徑 (Ctrl+O)
+2. 輸入/貼上影片網址 (支援拖放)
+3. 點擊「開始下載」(Ctrl+Enter)
 
-目前版本: {APP_VERSION}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⌨️ 鍵盤快捷鍵
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Ctrl+Enter    開始下載
+• Ctrl+Shift+V  快速貼上 URL
+• Ctrl+O        選擇下載路徑
+• F1            顯示說明
+• Ctrl+Q        退出程式
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 小技巧
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• 可直接拖放 URL 或 .txt 檔案到視窗
+• URL 會自動識別為單一影片或播放清單
+• 滑鼠停留在選項上可查看詳細說明
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 常見問題
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Q: Cookie 提取失敗？
+A: 請先在 Firefox 登入 YouTube/Bilibili，
+   並關閉所有 Firefox 視窗後再試。
+
+Q: 下載速度很慢？
+A: 可能是網路問題或來源限制。
+
+Q: 影片下載失敗？
+A: 確認 URL 正確無誤，嘗試重新下載。
+   會員影片需先提取 Cookie。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎬 支援平台: YouTube、Bilibili
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     """
         QMessageBox.information(self, "使用說明", help_text)
+
+    def export_download_report(self):
+        """匯出下載歷史報告"""
+        if not self.download_history:
+            QMessageBox.information(self, "提示", "目前沒有下載歷史記錄可匯出。")
+            return
+
+        # 讓使用者選擇格式和路徑
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "匯出下載報告",
+            f"download_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "CSV 檔案 (*.csv);;HTML 檔案 (*.html)",
+        )
+
+        if not file_path:
+            return
+
+        try:
+            if selected_filter == "CSV 檔案 (*.csv)" or file_path.endswith(".csv"):
+                self._export_csv(file_path if file_path.endswith(".csv") else file_path + ".csv")
+            else:
+                self._export_html(file_path if file_path.endswith(".html") else file_path + ".html")
+
+            self.log_to_overview(f"📊 報告已匯出: {file_path}")
+            QMessageBox.information(self, "匯出成功", f"報告已匯出至:\n{file_path}")
+
+        except Exception as e:
+            self.log_to_overview(f"❌ 匯出失敗: {e}")
+            QMessageBox.warning(self, "匯出失敗", f"無法匯出報告:\n{e}")
+
+    def _export_csv(self, file_path: str):
+        """匯出 CSV 格式報告"""
+        import csv
+
+        with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(["下載路徑", "影片 ID", "網址", "標題", "下載時間"])
+
+            for path, videos in self.download_history.items():
+                for video_id, info in videos.items():
+                    writer.writerow(
+                        [path, video_id, info.get("url", ""), info.get("title", ""), info.get("timestamp", "")]
+                    )
+
+    def _export_html(self, file_path: str):
+        """匯出 HTML 格式報告"""
+        total_count = sum(len(v) for v in self.download_history.values())
+
+        html_content = f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>下載歷史報告</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #1e1e1e; color: #d4d4d4; }}
+        h1 {{ color: #0e639c; }}
+        table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
+        th, td {{ padding: 10px; text-align: left; border: 1px solid #3c3c3c; }}
+        th {{ background: #0e639c; color: white; }}
+        tr:nth-child(even) {{ background: #2d2d30; }}
+        tr:hover {{ background: #3c3c3c; }}
+        a {{ color: #3794ff; }}
+        .summary {{ background: #2d2d30; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+    </style>
+</head>
+<body>
+    <h1>📊 下載歷史報告</h1>
+    <div class="summary">
+        <p>📅 產生時間: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+        <p>📁 總路徑數: {len(self.download_history)}</p>
+        <p>🎬 總影片數: {total_count}</p>
+    </div>
+    <table>
+        <tr>
+            <th>下載路徑</th>
+            <th>影片 ID</th>
+            <th>標題</th>
+            <th>下載時間</th>
+        </tr>
+"""
+
+        for path, videos in self.download_history.items():
+            for video_id, info in videos.items():
+                url = info.get("url", "")
+                title = info.get("title", "") or video_id
+                timestamp = info.get("timestamp", "")
+                html_content += f"""        <tr>
+            <td>{path}</td>
+            <td><a href="{url}" target="_blank">{video_id}</a></td>
+            <td>{title}</td>
+            <td>{timestamp}</td>
+        </tr>
+"""
+
+        html_content += """    </table>
+</body>
+</html>"""
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
 
     def load_download_history(self):
         try:

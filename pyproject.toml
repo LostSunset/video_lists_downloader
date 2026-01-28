@@ -1,6 +1,6 @@
 [project]
 name = "video-downloader-pyside6"
-version = "0.2.1"
+version = "0.3.0"
 description = "影片批量下載工具 - 支援 YouTube 與 Bilibili 平台"
 readme = "README.md"
 license = {text = "MIT"}
@@ -22,7 +22,6 @@ dev = [
 video-downloader = "video_downloader:main"
 
 [tool.uv]
-python = "3.14"
 
 [tool.ruff]
 target-version = "py314"
@@ -36,3 +35,8 @@ ignore = ["E501"]
 python_version = "3.14"
 warn_return_any = true
 warn_unused_ignores = true
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.14",
+]

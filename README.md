@@ -15,21 +15,47 @@
 
 ## 中文
 
+### 🚀 快速入門
+
+```bash
+# 1. 安裝 (使用 uv 推薦)
+uv sync
+# 或 pip install PySide6 yt-dlp
+
+# 2. 執行
+python video_downloader.py
+```
+
+**三步驟開始下載：**
+1. 選擇下載路徑 (`Ctrl+O`)
+2. 貼上影片網址（支援拖放！）
+3. 開始下載 (`Ctrl+Enter`)
+
 ### 功能特色
 
 - 🎬 支援 YouTube 和 Bilibili 影片/播放清單下載
 - 📊 下載進度追蹤與歷史記錄
-- 🎨 深色/淺色主題切換
-- 🔔 系統托盤與下載完成通知
-- ⚡ 下載速度限制功能
+- ⌨️ 鍵盤快捷鍵與拖放支援
+- 🍪 Cookie 狀態指示（🟢有效 🟡未驗證 🔴無效）
 - 🔄 自動重試機制
-- 📈 下載統計功能
-- 💾 設定匯出/匯入功能
+- 💡 完整的 Tooltip 說明
 
-### 截圖
+### ⌨️ 鍵盤快捷鍵
 
-<!-- TODO: 添加應用程式截圖 -->
-<!-- ![主介面](docs/images/main.png) -->
+| 快捷鍵 | 功能 |
+|--------|------|
+| `Ctrl+Enter` | 開始下載 |
+| `Ctrl+Shift+V` | 快速貼上 URL |
+| `Ctrl+O` | 選擇下載路徑 |
+| `F1` | 顯示說明 |
+| `Ctrl+Q` | 退出程式 |
+
+### 📖 文件
+
+- [快速入門指南](docs/quick_start.md)
+- [完整使用說明](docs/user_guide.md)
+- [常見問題 (FAQ)](docs/faq.md)
+- [疑難排解](docs/troubleshooting.md)
 
 ### 環境需求
 
@@ -37,22 +63,6 @@
 - PySide6
 - yt-dlp (用於下載)
 - ffmpeg (用於合併影片，可選)
-
-### 安裝
-
-```bash
-# 使用 pip
-pip install PySide6 yt-dlp
-
-# 或使用 uv (推薦)
-uv sync
-```
-
-### 使用方式
-
-```bash
-python video_downloader.py
-```
 
 ### 開發
 
@@ -71,16 +81,47 @@ ruff check .
 
 ## English
 
+### 🚀 Quick Start
+
+```bash
+# 1. Install (uv recommended)
+uv sync
+# or: pip install PySide6 yt-dlp
+
+# 2. Run
+python video_downloader.py
+```
+
+**Three steps to start downloading:**
+1. Select download path (`Ctrl+O`)
+2. Paste video URL (drag & drop supported!)
+3. Start download (`Ctrl+Enter`)
+
 ### Features
 
-- 🎬 Support YouTube and Bilibili video/playlist downloads
+- 🎬 YouTube and Bilibili video/playlist downloads
 - 📊 Download progress tracking and history
-- 🎨 Dark/Light theme switching
-- 🔔 System tray and download completion notifications
-- ⚡ Download speed limit
+- ⌨️ Keyboard shortcuts and drag-drop support
+- 🍪 Cookie status indicators (🟢valid 🟡unverified 🔴invalid)
 - 🔄 Auto-retry mechanism
-- 📈 Download statistics
-- 💾 Settings export/import
+- 💡 Comprehensive tooltips
+
+### ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Enter` | Start download |
+| `Ctrl+Shift+V` | Quick paste URL |
+| `Ctrl+O` | Select download path |
+| `F1` | Show help |
+| `Ctrl+Q` | Quit |
+
+### 📖 Documentation
+
+- [Quick Start Guide](docs/quick_start.md)
+- [User Guide](docs/user_guide.md)
+- [FAQ](docs/faq.md)
+- [Troubleshooting](docs/troubleshooting.md)
 
 ### Requirements
 
@@ -88,22 +129,6 @@ ruff check .
 - PySide6
 - yt-dlp (for downloading)
 - ffmpeg (for merging, optional)
-
-### Installation
-
-```bash
-# Using pip
-pip install PySide6 yt-dlp
-
-# Or using uv (recommended)
-uv sync
-```
-
-### Usage
-
-```bash
-python video_downloader.py
-```
 
 ### Development
 
@@ -124,6 +149,15 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.3.0 (2026-01-28)
+- 🆕 鍵盤快捷鍵支援 (Ctrl+Enter, Ctrl+Shift+V, F1, Ctrl+O, Ctrl+Q)
+- 🆕 拖放 URL 與檔案支援
+- 🆕 自動 URL 類型偵測
+- 🆕 Cookie 狀態指示燈 (🟢🟡🔴)
+- 🆕 所有設定選項 Tooltip 說明
+- 🆕 完整文件：快速入門、FAQ、疑難排解、使用指南
+- 🆕 增強說明對話框
+
 ### v0.2.0 (2026-01-26)
 - 新增下載速度限制、自動重試、系統托盤、主題切換等功能
 - 從 PyQt6 遷移到 PySide6
@@ -139,3 +173,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md)
 ## 授權 | License
 
 [MIT License](LICENSE)
+
