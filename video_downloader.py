@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.4.2"
+APP_VERSION = "v0.4.3"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -712,16 +712,41 @@ class BatchDownloadWorker(QThread):
                 return_code = process.wait(timeout=timeout if timeout > 0 else None)
                 # 播放清單中部分影片失敗（如被刪除）時 yt-dlp 回傳非零，
                 # 但只要有任何影片成功下載就視為成功
-                return return_code == 0 or has_successful_download
+                success = return_code == 0 or has_successful_download
+                if not success:
+                    self._cleanup_partial_files()
+                return success
 
             except subprocess.TimeoutExpired:
                 process.kill()
                 self.log_message.emit(" 下載超時")
+                self._cleanup_partial_files()
                 return False
 
         except (OSError, subprocess.SubprocessError) as e:
             self.log_message.emit(f" 錯誤: {str(e)}")
+            self._cleanup_partial_files()
             return False
+
+    def _cleanup_partial_files(self):
+        """清理下載失敗後殘留的不完整檔案（.part, .ytdl, .temp 等）"""
+        download_path = self.settings.get("download_path")
+        if not download_path or not os.path.isdir(download_path):
+            return
+        try:
+            cleaned = 0
+            for name in os.listdir(download_path):
+                if name.endswith(CONSTANTS.IGNORE_SUFFIXES):
+                    file_path = os.path.join(download_path, name)
+                    try:
+                        os.remove(file_path)
+                        cleaned += 1
+                    except OSError:
+                        pass
+            if cleaned:
+                self.log_message.emit(f" 已清理 {cleaned} 個不完整檔案")
+        except OSError:
+            pass
 
     def _parse_progress(self, line: str) -> str:
         """解析進度輸出 (使用預編譯 regex)"""
@@ -756,6 +781,9 @@ class BatchDownloadWorker(QThread):
             cookie_file = self.settings.get(f"{platform}_cookie_file")
             if cookie_file and os.path.exists(cookie_file):
                 cmd.extend(["--cookies", cookie_file])
+            else:
+                # Cookie 檔案不存在時，直接從瀏覽器讀取（避免 403 錯誤）
+                cmd.extend(["--cookies-from-browser", "firefox"])
 
         if self.settings.get("download_path"):
             custom_template = None

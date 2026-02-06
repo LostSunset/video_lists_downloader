@@ -149,6 +149,10 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.4.3 (2026-02-06)
+- 🐛 修正 Cookie 檔案不存在時自動 fallback 到 `--cookies-from-browser firefox`，解決 403 錯誤
+- 🐛 下載失敗後自動清理 `.part`、`.ytdl`、`.temp` 等不完整檔案
+
 ### v0.4.2 (2026-02-06)
 - 🐛 播放清單檢查自動排除被作者刪除/私人化的影片
 - 🐛 修正播放清單部分影片失敗導致整個任務標記為失敗的問題
