@@ -149,6 +149,10 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.4.1 (2026-02-06)
+- 🐛 修正播放清單檢查無法偵測本地檔案缺失的問題
+- 🐛 檢查時自動掃描已知影片的本地檔案，缺失時清除歷史紀錄並提示重新下載
+
 ### v0.4.0 (2026-02-06)
 - 🔧 例外處理改善：17 處 bare `except Exception:` 替換為具體例外類型
 - 🔧 Cookie 提取程式碼重構，消除 ~40 行重複

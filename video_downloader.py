@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.4.0"
+APP_VERSION = "v0.4.1"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -1585,7 +1585,14 @@ class MainWindow(QMainWindow):
 
         added_videos = [{"id": vid, "title": ""} for vid in current_ids if vid not in prev_ids]
         removed_ids = [vid for vid in prev_ids if vid not in current_ids]
-        has_changes = bool(added_videos or removed_ids)
+
+        # 檢查本地檔案缺失的影片（在清單中但檔案已被刪除）
+        missing_videos = []
+        for vid in current_ids:
+            if vid in prev_ids and not self._has_local_file_for_video(normalized_path, vid):
+                missing_videos.append({"id": vid, "title": ""})
+
+        has_changes = bool(added_videos or removed_ids or missing_videos)
 
         if not has_changes:
             self.update_playlist_state(normalized_path, playlist_id, playlist_url, current_ids)
@@ -1593,11 +1600,19 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "偵測結果", "播放清單沒有新影片。")
             return {"status": "no-change"}
 
+        # 組合提示訊息
+        msg_parts = []
+        if added_videos:
+            msg_parts.append(f"{len(added_videos)} 部新影片")
+        if missing_videos:
+            msg_parts.append(f"{len(missing_videos)} 部本地檔案缺失")
+        summary = "、".join(msg_parts)
+
         if prompt_user:
             reply = QMessageBox.question(
                 self,
                 "播放清單有更新",
-                f"偵測到 {len(added_videos)} 部新影片，是否繼續?",
+                f"偵測到 {summary}，是否繼續?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
@@ -1605,17 +1620,33 @@ class MainWindow(QMainWindow):
 
         self.update_playlist_state(normalized_path, playlist_id, playlist_url, current_ids)
 
-        if offer_auto_download and added_videos:
+        # 清除缺失影片的下載歷史紀錄，讓它們可以被重新下載
+        if missing_videos:
+            with self._history_lock:
+                for vid_info in missing_videos:
+                    vid = vid_info["id"]
+                    if normalized_path in self.download_history and vid in self.download_history[normalized_path]:
+                        del self.download_history[normalized_path][vid]
+                if normalized_path in self.download_history and not self.download_history[normalized_path]:
+                    del self.download_history[normalized_path]
+                self.save_download_history()
+
+        all_actionable = added_videos + missing_videos
+        if offer_auto_download and all_actionable:
             auto_reply = QMessageBox.question(
                 self,
                 "自動下載",
-                f"偵測到 {len(added_videos)} 部新影片，是否立即下載?",
+                f"偵測到 {summary}，是否立即下載?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if auto_reply == QMessageBox.StandardButton.Yes:
                 self.auto_download_playlist(playlist_url, normalized_path)
 
-        return {"status": "proceed" if not manual_trigger else "manual", "added_videos": added_videos}
+        return {
+            "status": "proceed" if not manual_trigger else "manual",
+            "added_videos": added_videos,
+            "missing_videos": missing_videos,
+        }
 
     def auto_download_playlist(self, playlist_url: str, download_path: str):
         settings = self.build_download_settings(download_path)
