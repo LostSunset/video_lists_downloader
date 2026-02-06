@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.4.1"
+APP_VERSION = "v0.4.2"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -686,6 +686,7 @@ class BatchDownloadWorker(QThread):
             )
 
             last_progress = ""
+            has_successful_download = False
             try:
                 for line in iter(process.stdout.readline, ""):
                     if not self._is_running:
@@ -699,10 +700,19 @@ class BatchDownloadWorker(QThread):
                         if progress_info and progress_info != last_progress:
                             self.download_progress.emit(progress_info)
                             last_progress = progress_info
+                        # 偵測下載完成的標記
+                        if "has already been downloaded" in line or "100%" in line:
+                            has_successful_download = True
+                    elif "ERROR" in line or "WARNING" in line:
+                        self.log_message.emit(f" {line}")
+                    elif "[Merger]" in line or "Deleting original file" in line:
+                        has_successful_download = True
 
                 process.stdout.close()
                 return_code = process.wait(timeout=timeout if timeout > 0 else None)
-                return return_code == 0
+                # 播放清單中部分影片失敗（如被刪除）時 yt-dlp 回傳非零，
+                # 但只要有任何影片成功下載就視為成功
+                return return_code == 0 or has_successful_download
 
             except subprocess.TimeoutExpired:
                 process.kill()
@@ -1577,8 +1587,12 @@ class MainWindow(QMainWindow):
         if not entries:
             return {"status": "error", "reason": "empty"}
 
+        # 過濾被作者刪除或設為私人的影片（無法下載）
+        unavailable_titles = {"[deleted video]", "[private video]"}
+        available_entries = [e for e in entries if (e.get("title") or "").strip().lower() not in unavailable_titles]
+
         playlist_id = metadata.get("id") or PlatformUtils.extract_playlist_id(playlist_url)
-        current_ids = [e.get("id") or e.get("url") for e in entries if e.get("id") or e.get("url")]
+        current_ids = [e.get("id") or e.get("url") for e in available_entries if e.get("id") or e.get("url")]
 
         prev_state = self.playlist_states.get(normalized_path, {}).get(playlist_id, {})
         prev_ids = set(prev_state.get("video_ids", []))
