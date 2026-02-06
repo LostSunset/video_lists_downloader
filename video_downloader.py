@@ -2013,7 +2013,14 @@ A: 確認 URL 正確無誤，嘗試重新下載。
         if self._has_local_file_for_video(download_path, video_id):
             return True
         with self._history_lock:
-            return download_path in self.download_history and video_id in self.download_history[download_path]
+            if download_path in self.download_history and video_id in self.download_history[download_path]:
+                # 歷史紀錄存在但本地檔案已被刪除，移除紀錄以允許重新下載
+                del self.download_history[download_path][video_id]
+                if not self.download_history[download_path]:
+                    del self.download_history[download_path]
+                self.save_download_history()
+                return False
+            return False
 
     def _has_local_file_for_video(self, download_path: str, video_id: str) -> bool:
         download_path = self.normalize_path(download_path)
