@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.3.0"
+APP_VERSION = "v0.4.0"
 
 
 # ==================== 狀態顏色定義 ====================

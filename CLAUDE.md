@@ -68,6 +68,16 @@ Use the `/release` workflow for automated releases:
 
 See `.agent/workflows/release.md` for detailed steps.
 
+### Versioning Rules (Semantic Versioning)
+
+Every push MUST bump the version according to these rules:
+
+| Change Type | Version Bump | Example |
+|-------------|-------------|---------|
+| `fix:` Bug 修復 / 效能提升 | PATCH | v0.3.0 → v0.3.1 |
+| `feat:` 新功能 | MINOR | v0.3.0 → v0.4.0 |
+| `breaking:` 重大變更 | MAJOR | v0.3.0 → v1.0.0 |
+
 ### Version Update Locations
 
 When releasing a new version, update:

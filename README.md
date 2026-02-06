@@ -149,6 +149,13 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.4.0 (2026-02-06)
+- 🔧 例外處理改善：17 處 bare `except Exception:` 替換為具體例外類型
+- 🔧 Cookie 提取程式碼重構，消除 ~40 行重複
+- 🔧 新增執行緒安全機制（threading.Lock）防止競態條件
+- 🐛 修正已刪除影片在播放清單檢查時不會重新下載的問題
+- 🧪 測試擴充：從 9 個增加到 80 個單元測試
+
 ### v0.3.0 (2026-01-28)
 - 🆕 鍵盤快捷鍵支援 (Ctrl+Enter, Ctrl+Shift+V, F1, Ctrl+O, Ctrl+Q)
 - 🆕 拖放 URL 與檔案支援
