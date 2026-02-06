@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -251,38 +252,17 @@ class CookieManager:
         self.last_update = 0
         self.update_interval = CONSTANTS.COOKIE_UPDATE_INTERVAL
 
-    def extract_firefox_cookies_youtube(self, output_file: str) -> tuple[bool, str]:
-        """從 Firefox 提取 YouTube Cookies"""
+    def _extract_firefox_cookies(
+        self,
+        output_file: str,
+        platform: str,
+        test_urls: list[dict[str, list[str]]],
+        key_cookies: list[str],
+        fail_message: str,
+    ) -> tuple[bool, str]:
+        """從 Firefox 提取指定平台的 Cookies（共用邏輯）"""
         try:
-            methods = [
-                {
-                    "name": "增強提取",
-                    "args": [
-                        "--cookies-from-browser",
-                        "firefox",
-                        "--cookies",
-                        output_file,
-                        "--print",
-                        "webpage_url",
-                        "--simulate",
-                        "--no-warnings",
-                        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-                    ],
-                },
-                {
-                    "name": "標準提取",
-                    "args": [
-                        "--cookies-from-browser",
-                        "firefox",
-                        "--cookies",
-                        output_file,
-                        "--simulate",
-                        "--quiet",
-                        "https://www.youtube.com",
-                    ],
-                },
-            ]
-            for method in methods:
+            for method in test_urls:
                 try:
                     result = subprocess.run(
                         ["yt-dlp"] + method["args"],
@@ -298,74 +278,99 @@ class CookieManager:
                             continue
                         with open(output_file, encoding="utf-8") as f:
                             content = f.read()
-                        found_keys = [k for k in CONSTANTS.YOUTUBE_KEY_COOKIES if k in content]
-                        return (
-                            True,
-                            f"{method['name']}成功！\n檔案大小: {file_size} bytes\n找到關鍵 Cookie: {', '.join(found_keys) if found_keys else '無'}",
-                        )
-                except (subprocess.TimeoutExpired, Exception):
+                        found_keys = [k for k in key_cookies if k in content]
+                        missing_keys = [k for k in key_cookies if k not in found_keys]
+                        if platform == "youtube":
+                            return (
+                                True,
+                                f"{method['name']}成功！\n檔案大小: {file_size} bytes\n"
+                                f"找到關鍵 Cookie: {', '.join(found_keys) if found_keys else '無'}",
+                            )
+                        else:
+                            if missing_keys:
+                                return True, f"{method['name']}完成，但缺少關鍵 Cookie: {', '.join(missing_keys)}"
+                            return True, f"{method['name']}成功！找到所有關鍵 Cookie"
+                except (subprocess.TimeoutExpired, OSError):
                     continue
-            return False, "所有提取方法都失敗。請確認:\n1. Firefox 已安裝並登入 YouTube\n2. 已關閉所有 Firefox 視窗"
-        except Exception as e:
+            return False, fail_message
+        except (OSError, subprocess.SubprocessError) as e:
             return False, f"提取失敗: {str(e)}"
+
+    def extract_firefox_cookies_youtube(self, output_file: str) -> tuple[bool, str]:
+        """從 Firefox 提取 YouTube Cookies"""
+        methods = [
+            {
+                "name": "增強提取",
+                "args": [
+                    "--cookies-from-browser",
+                    "firefox",
+                    "--cookies",
+                    output_file,
+                    "--print",
+                    "webpage_url",
+                    "--simulate",
+                    "--no-warnings",
+                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                ],
+            },
+            {
+                "name": "標準提取",
+                "args": [
+                    "--cookies-from-browser",
+                    "firefox",
+                    "--cookies",
+                    output_file,
+                    "--simulate",
+                    "--quiet",
+                    "https://www.youtube.com",
+                ],
+            },
+        ]
+        return self._extract_firefox_cookies(
+            output_file,
+            "youtube",
+            methods,
+            CONSTANTS.YOUTUBE_KEY_COOKIES,
+            "所有提取方法都失敗。請確認:\n1. Firefox 已安裝並登入 YouTube\n2. 已關閉所有 Firefox 視窗",
+        )
 
     def extract_firefox_cookies_bilibili(self, output_file: str) -> tuple[bool, str]:
         """從 Firefox 提取 Bilibili Cookies"""
-        try:
-            methods = [
-                {
-                    "name": "增強提取",
-                    "args": [
-                        "--cookies-from-browser",
-                        "firefox",
-                        "--cookies",
-                        output_file,
-                        "--print",
-                        "webpage_url",
-                        "--simulate",
-                        "--no-warnings",
-                        "https://www.bilibili.com/video/BV1xx411c7mD",
-                    ],
-                },
-                {
-                    "name": "標準提取",
-                    "args": [
-                        "--cookies-from-browser",
-                        "firefox",
-                        "--cookies",
-                        output_file,
-                        "--simulate",
-                        "--quiet",
-                        "https://www.bilibili.com",
-                    ],
-                },
-            ]
-            for method in methods:
-                try:
-                    result = subprocess.run(
-                        ["yt-dlp"] + method["args"],
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        timeout=45,
-                    )
-                    if result.returncode == 0 and os.path.exists(output_file):
-                        file_size = os.path.getsize(output_file)
-                        if file_size < 100:
-                            continue
-                        with open(output_file, encoding="utf-8") as f:
-                            content = f.read()
-                        found_keys = [k for k in CONSTANTS.BILIBILI_KEY_COOKIES if k in content]
-                        missing_keys = [k for k in CONSTANTS.BILIBILI_KEY_COOKIES if k not in found_keys]
-                        if missing_keys:
-                            return True, f"{method['name']}完成，但缺少關鍵 Cookie: {', '.join(missing_keys)}"
-                        return True, f"{method['name']}成功！找到所有關鍵 Cookie"
-                except (subprocess.TimeoutExpired, Exception):
-                    continue
-            return False, "所有提取方法都失敗。"
-        except Exception as e:
-            return False, f"提取失敗: {str(e)}"
+        methods = [
+            {
+                "name": "增強提取",
+                "args": [
+                    "--cookies-from-browser",
+                    "firefox",
+                    "--cookies",
+                    output_file,
+                    "--print",
+                    "webpage_url",
+                    "--simulate",
+                    "--no-warnings",
+                    "https://www.bilibili.com/video/BV1xx411c7mD",
+                ],
+            },
+            {
+                "name": "標準提取",
+                "args": [
+                    "--cookies-from-browser",
+                    "firefox",
+                    "--cookies",
+                    output_file,
+                    "--simulate",
+                    "--quiet",
+                    "https://www.bilibili.com",
+                ],
+            },
+        ]
+        return self._extract_firefox_cookies(
+            output_file,
+            "bilibili",
+            methods,
+            CONSTANTS.BILIBILI_KEY_COOKIES,
+            "所有提取方法都失敗。",
+        )
 
     def validate_youtube_cookies(self, cookie_file: str) -> tuple[bool, str]:
         """驗證 YouTube Cookies 有效性"""
@@ -392,7 +397,7 @@ class CookieManager:
             return (True, "Cookies 有效") if result.returncode == 0 else (False, "Cookies 無效或已過期")
         except subprocess.TimeoutExpired:
             return False, "測試超時"
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             return False, f"測試錯誤: {str(e)}"
 
     def validate_bilibili_cookies(self, cookie_file: str) -> tuple[bool, dict]:
@@ -412,7 +417,7 @@ class CookieManager:
             if missing:
                 return False, {"error": f"缺少關鍵 Cookie: {', '.join(missing)}"}
             return True, {"message": "Cookies 檔案格式正確"}
-        except Exception as e:
+        except (OSError, ValueError) as e:
             return False, {"error": f"驗證錯誤: {str(e)}"}
 
 
@@ -469,10 +474,10 @@ class DownloadWorker(QThread):
             try:
                 self.process.terminate()
                 self.process.wait(timeout=5)
-            except Exception:
+            except OSError:
                 try:
                     self.process.kill()
-                except Exception:
+                except OSError:
                     pass
 
     def run(self):
@@ -522,7 +527,7 @@ class DownloadWorker(QThread):
                 elapsed = time.time() - self.start_time
                 return True, f"下載完成 (耗時 {elapsed:.1f}s)"
             return False, f"下載失敗 (返回碼: {self.process.returncode})"
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             return False, f"錯誤: {str(e)}"
 
     def _build_command(self, platform: str) -> list[str]:
@@ -657,7 +662,7 @@ class BatchDownloadWorker(QThread):
 
             self.task_finished.emit(self.stats)
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             self.log_message.emit(f" 任務錯誤: {str(e)}")
             traceback.print_exc()
 
@@ -704,7 +709,7 @@ class BatchDownloadWorker(QThread):
                 self.log_message.emit(" 下載超時")
                 return False
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             self.log_message.emit(f" 錯誤: {str(e)}")
             return False
 
@@ -729,7 +734,7 @@ class BatchDownloadWorker(QThread):
 
                 if parts:
                     return " | ".join(parts)
-        except Exception:
+        except (ValueError, AttributeError):
             pass
         return ""
 
@@ -819,6 +824,8 @@ class MainWindow(QMainWindow):
 
         self.workers = []
         self.global_seen_ids = set()
+        self._seen_ids_lock = threading.Lock()
+        self._history_lock = threading.Lock()
         self.cookie_manager = CookieManager(self)
         self.settings = QSettings("VideoDownloader", "PySide6App")
 
@@ -1505,7 +1512,7 @@ class MainWindow(QMainWindow):
             try:
                 with open(file_path, encoding="utf-8") as f:
                     return [line.strip() for line in f if line.strip()]
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 return []
         return []
 
@@ -1546,7 +1553,7 @@ class MainWindow(QMainWindow):
             if result.returncode != 0:
                 return None
             return json.loads(result.stdout)
-        except Exception:
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             return None
 
     def detect_playlist_updates(
@@ -1763,10 +1770,8 @@ class MainWindow(QMainWindow):
                 )
                 if result.returncode == 0:
                     self.log_to_overview(" yt-dlp 已更新")
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 self.log_to_overview(f" 檢查 yt-dlp 錯誤: {e}")
-
-        import threading
 
         threading.Thread(target=check, daemon=True).start()
 
@@ -1842,7 +1847,7 @@ A: 確認 URL 正確無誤，嘗試重新下載。
             self.log_to_overview(f"📊 報告已匯出: {file_path}")
             QMessageBox.information(self, "匯出成功", f"報告已匯出至:\n{file_path}")
 
-        except Exception as e:
+        except OSError as e:
             self.log_to_overview(f"❌ 匯出失敗: {e}")
             QMessageBox.warning(self, "匯出失敗", f"無法匯出報告:\n{e}")
 
@@ -1925,7 +1930,7 @@ A: 確認 URL 正確無誤，嘗試重新下載。
                 self._normalize_download_history_keys()
                 total = sum(len(v) for v in self.download_history.values())
                 self.log_to_overview(f" 已載入下載歷史: {total} 個影片")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             self.download_history = {}
             self.log_to_overview(f" 載入下載歷史失敗: {e}")
 
@@ -1935,7 +1940,7 @@ A: 確認 URL 正確無誤，嘗試重新下載。
                 with open(self.playlist_state_file, encoding="utf-8") as f:
                     self.playlist_states = json.load(f)
                 self._normalize_playlist_state_keys()
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             self.playlist_states = {}
 
     def load_playlist_updates_log(self):
@@ -1943,7 +1948,7 @@ A: 確認 URL 正確無誤，嘗試重新下載。
             if os.path.exists(self.playlist_updates_log_file):
                 with open(self.playlist_updates_log_file, encoding="utf-8") as f:
                     self.playlist_updates_log = json.load(f)
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             self.playlist_updates_log = []
 
     def _normalize_download_history_keys(self):
@@ -1968,14 +1973,14 @@ A: 確認 URL 正確無誤，嘗試重新下載。
         try:
             with open(self.download_history_file, "w", encoding="utf-8") as f:
                 json.dump(self.download_history, f, ensure_ascii=False, indent=2)
-        except Exception:
+        except OSError:
             pass
 
     def save_playlist_states(self):
         try:
             with open(self.playlist_state_file, "w", encoding="utf-8") as f:
                 json.dump(self.playlist_states, f, ensure_ascii=False, indent=2)
-        except Exception:
+        except OSError:
             pass
 
     def update_playlist_state(self, download_path: str, playlist_id: str, playlist_url: str, video_ids: list[str]):
@@ -1993,20 +1998,22 @@ A: 確認 URL 正確無誤，嘗試重新下載。
 
     def add_to_download_history(self, download_path: str, video_id: str, url: str, title: str = ""):
         download_path = self.normalize_path(download_path)
-        if download_path not in self.download_history:
-            self.download_history[download_path] = {}
-        self.download_history[download_path][video_id] = {
-            "url": url,
-            "title": title,
-            "timestamp": datetime.datetime.now().isoformat(),
-        }
-        self.save_download_history()
+        with self._history_lock:
+            if download_path not in self.download_history:
+                self.download_history[download_path] = {}
+            self.download_history[download_path][video_id] = {
+                "url": url,
+                "title": title,
+                "timestamp": datetime.datetime.now().isoformat(),
+            }
+            self.save_download_history()
 
     def is_downloaded(self, download_path: str, video_id: str) -> bool:
         download_path = self.normalize_path(download_path)
         if self._has_local_file_for_video(download_path, video_id):
             return True
-        return download_path in self.download_history and video_id in self.download_history[download_path]
+        with self._history_lock:
+            return download_path in self.download_history and video_id in self.download_history[download_path]
 
     def _has_local_file_for_video(self, download_path: str, video_id: str) -> bool:
         download_path = self.normalize_path(download_path)
@@ -2028,7 +2035,7 @@ A: 確認 URL 正確無誤，嘗試重新下載。
                         return True
                     if SequenceMatcher(None, file_id, video_id_clean).ratio() >= 0.75:
                         return True
-        except Exception:
+        except OSError:
             pass
         return False
 
@@ -2077,9 +2084,9 @@ A: 確認 URL 正確無誤，嘗試重新下載。
                 for cookie_file in glob.glob(pattern):
                     try:
                         os.remove(cookie_file)
-                    except Exception:
+                    except OSError:
                         pass
-        except Exception:
+        except OSError:
             pass
 
 
