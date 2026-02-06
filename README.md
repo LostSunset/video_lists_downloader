@@ -149,6 +149,10 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.4.5 (2026-02-06)
+- 🐛 修正 YouTube n-challenge 仍然失敗的問題：加入 `--remote-components ejs:github` 下載遠端 challenge solver 腳本
+- 🔧 TV player variant + remote EJS solver 雙重修正，徹底解決 `Requested format is not available` 錯誤
+
 ### v0.4.4 (2026-02-06)
 - 🐛 修正 YouTube n-challenge 解碼失敗導致 `Requested format is not available` 錯誤
 - 🔧 YouTube 下載自動使用 `player_js_variant=tv` 繞過 player 4e51e895 的 EJS 相容性問題

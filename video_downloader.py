@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.4.4"
+APP_VERSION = "v0.4.5"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -546,6 +546,7 @@ class DownloadWorker(QThread):
             cmd.extend(["--cookies", self.cookie_file])
         if platform == "youtube":
             cmd.extend(["--extractor-args", "youtube:player_js_variant=tv"])
+            cmd.extend(["--remote-components", "ejs:github"])
         elif platform == "bilibili":
             cmd.extend(["--referer", "https://www.bilibili.com", "--add-header", "Origin:https://www.bilibili.com"])
         if self.format_id:
@@ -832,6 +833,7 @@ class BatchDownloadWorker(QThread):
 
         if platform == "youtube":
             cmd.extend(["--extractor-args", "youtube:player_js_variant=tv"])
+            cmd.extend(["--remote-components", "ejs:github"])
 
         if platform == "bilibili":
             cmd.extend(
