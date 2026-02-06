@@ -149,6 +149,10 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.4.4 (2026-02-06)
+- 🐛 修正 YouTube n-challenge 解碼失敗導致 `Requested format is not available` 錯誤
+- 🔧 YouTube 下載自動使用 `player_js_variant=tv` 繞過 player 4e51e895 的 EJS 相容性問題
+
 ### v0.4.3 (2026-02-06)
 - 🐛 修正 Cookie 檔案不存在時自動 fallback 到 `--cookies-from-browser firefox`，解決 403 錯誤
 - 🐛 下載失敗後自動清理 `.part`、`.ytdl`、`.temp` 等不完整檔案

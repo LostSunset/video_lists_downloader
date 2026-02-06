@@ -1,6 +1,6 @@
 [project]
 name = "video-downloader-pyside6"
-version = "0.4.3"
+version = "0.4.4"
 description = "影片批量下載工具 - 支援 YouTube 與 Bilibili 平台"
 readme = "README.md"
 license = {text = "MIT"}
