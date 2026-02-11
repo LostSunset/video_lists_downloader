@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.5.0"
+APP_VERSION = "v0.5.1"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -1509,14 +1509,31 @@ class MainWindow(QMainWindow):
             return
 
         if self.playlist_radio.isChecked() and len(urls) == 1:
+            playlist_url = urls[0]
             detection = self.detect_playlist_updates(
-                urls[0],
+                playlist_url,
                 download_path,
                 prompt_user=True,
                 offer_auto_download=False,
                 remember=self.remember_playlist_check.isChecked(),
             )
             if detection.get("status") == "cancel":
+                return
+
+            # 展開播放清單為個別影片 URL，逐一下載以正確追蹤進度
+            video_ids = detection.get("video_ids", [])
+            expanded, skipped = self._expand_playlist_urls(
+                playlist_url, video_ids=video_ids or None, download_path=download_path
+            )
+            if expanded:
+                urls = expanded
+                msg = f" 展開播放清單：{len(expanded)} 部影片待下載"
+                if skipped:
+                    msg += f"（已跳過 {skipped} 部已下載）"
+                self.log_to_overview(msg)
+            elif skipped > 0:
+                self.log_to_overview(f" 所有 {skipped} 部影片已下載過")
+                QMessageBox.information(self, "提示", "所有影片已下載過，無需再次下載。")
                 return
 
         if self.use_cookies_check.isChecked():
@@ -1666,7 +1683,7 @@ class MainWindow(QMainWindow):
                 )
             if manual_trigger and show_no_change_message:
                 QMessageBox.information(self, "偵測結果", f"{title_prefix}播放清單沒有新影片。")
-            return {"status": "no-change"}
+            return {"status": "no-change", "video_ids": current_ids}
 
         # 組合提示訊息
         msg_parts = []
@@ -1717,13 +1734,58 @@ class MainWindow(QMainWindow):
             "status": "proceed" if not manual_trigger else "manual",
             "added_videos": added_videos,
             "missing_videos": missing_videos,
+            "video_ids": current_ids,
         }
 
     def auto_download_playlist(self, playlist_url: str, download_path: str):
         settings = self.build_download_settings(download_path)
         if settings:
+            expanded, _ = self._expand_playlist_urls(playlist_url, download_path=download_path)
+            urls = expanded if expanded else [playlist_url]
             task_id = len(self.workers) + 1
-            self.create_task(task_id, [playlist_url], settings)
+            self.create_task(task_id, urls, settings)
+
+    def _expand_playlist_urls(
+        self,
+        playlist_url: str,
+        video_ids: list[str] | None = None,
+        download_path: str = "",
+    ) -> tuple[list[str], int]:
+        """將播放清單展開為個別影片 URL，過濾已下載影片。
+
+        Args:
+            playlist_url: 播放清單網址
+            video_ids: 已取得的影片 ID 列表（可省略，會自動取得）
+            download_path: 下載路徑（用於已下載判斷）
+
+        Returns:
+            (展開的 URL 列表, 跳過數量)
+        """
+        if not video_ids:
+            metadata = self.fetch_playlist_metadata(playlist_url)
+            if not metadata:
+                return [], 0
+            entries = metadata.get("entries") or []
+            unavailable_titles = {"[deleted video]", "[private video]"}
+            video_ids = [
+                e.get("id") or e.get("url")
+                for e in entries
+                if (e.get("id") or e.get("url")) and (e.get("title") or "").strip().lower() not in unavailable_titles
+            ]
+
+        platform = PlatformUtils.detect_platform(playlist_url)
+        normalized_path = self.normalize_path(download_path)
+        expanded = []
+        skipped = 0
+        for vid in video_ids:
+            if normalized_path and self.is_downloaded(normalized_path, vid):
+                skipped += 1
+                continue
+            if platform == "bilibili":
+                expanded.append(f"https://www.bilibili.com/video/{vid}")
+            else:
+                expanded.append(f"https://www.youtube.com/watch?v={vid}")
+        return expanded, skipped
 
     def manual_check_playlist_updates(self):
         playlist_url = self.playlist_url_edit.text().strip()
