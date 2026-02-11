@@ -37,6 +37,7 @@ env/
 download_history.json
 playlist_state.json
 playlist_updates_log.json
+ui_preview*.png
 
 # Old versions folder (keep locally, don't upload)
 old_version/
