@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.5.1"
+APP_VERSION = "v0.5.2"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -796,6 +796,9 @@ class BatchDownloadWorker(QThread):
                     custom_template = template_text
 
             base_template = custom_template or "%(uploader)s - %(title)s [%(id)s]"
+            # 啟用檔名修剪時，將 [%(id)s] 放到前面，防止被截斷導致檔名碰撞
+            if not custom_template and self.settings.get("auto_trim_filename"):
+                base_template = "[%(id)s] %(uploader)s - %(title)s"
             if "%(ext" not in base_template:
                 base_template = f"{base_template}.%(ext)s"
 
