@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.4.5"
+APP_VERSION = "v0.5.0"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -1113,6 +1113,11 @@ class MainWindow(QMainWindow):
         self.playlist_url_edit.textChanged.connect(self._on_playlist_url_changed)
         layout.addWidget(self.playlist_url_edit)
 
+        self.remember_playlist_check = QCheckBox("記憶此播放清單")
+        self.remember_playlist_check.setChecked(True)
+        self.remember_playlist_check.setToolTip("勾選後會記錄此播放清單，可在「檢查所有清單」中追蹤更新")
+        layout.addWidget(self.remember_playlist_check)
+
         self.file_radio = QRadioButton("網址清單檔案")
         self.file_radio.setToolTip("從 .txt 檔案載入多個網址")
         layout.addWidget(self.file_radio)
@@ -1505,7 +1510,11 @@ class MainWindow(QMainWindow):
 
         if self.playlist_radio.isChecked() and len(urls) == 1:
             detection = self.detect_playlist_updates(
-                urls[0], download_path, prompt_user=True, offer_auto_download=False
+                urls[0],
+                download_path,
+                prompt_user=True,
+                offer_auto_download=False,
+                remember=self.remember_playlist_check.isChecked(),
             )
             if detection.get("status") == "cancel":
                 return
@@ -1609,6 +1618,7 @@ class MainWindow(QMainWindow):
         manual_trigger: bool = False,
         show_no_change_message: bool = True,
         offer_auto_download: bool = True,
+        remember: bool = True,
     ) -> dict:
         if not playlist_url or not download_path:
             return {"status": "error"}
@@ -1621,6 +1631,9 @@ class MainWindow(QMainWindow):
         entries = metadata.get("entries") or []
         if not entries:
             return {"status": "error", "reason": "empty"}
+
+        # 取得播放清單標題，用於對話框顯示
+        playlist_title = metadata.get("title", "")
 
         # 過濾被作者刪除或設為私人的影片（無法下載）
         unavailable_titles = {"[deleted video]", "[private video]"}
@@ -1643,10 +1656,16 @@ class MainWindow(QMainWindow):
 
         has_changes = bool(added_videos or removed_ids or missing_videos)
 
+        # 對話框中顯示的播放清單名稱前綴
+        title_prefix = f"【{playlist_title}】\n" if playlist_title else ""
+
         if not has_changes:
-            self.update_playlist_state(normalized_path, playlist_id, playlist_url, current_ids)
+            if remember:
+                self.update_playlist_state(
+                    normalized_path, playlist_id, playlist_url, current_ids, playlist_title=playlist_title
+                )
             if manual_trigger and show_no_change_message:
-                QMessageBox.information(self, "偵測結果", "播放清單沒有新影片。")
+                QMessageBox.information(self, "偵測結果", f"{title_prefix}播放清單沒有新影片。")
             return {"status": "no-change"}
 
         # 組合提示訊息
@@ -1661,13 +1680,16 @@ class MainWindow(QMainWindow):
             reply = QMessageBox.question(
                 self,
                 "播放清單有更新",
-                f"偵測到 {summary}，是否繼續?",
+                f"{title_prefix}偵測到 {summary}，是否繼續?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return {"status": "cancel"}
 
-        self.update_playlist_state(normalized_path, playlist_id, playlist_url, current_ids)
+        if remember:
+            self.update_playlist_state(
+                normalized_path, playlist_id, playlist_url, current_ids, playlist_title=playlist_title
+            )
 
         # 清除缺失影片的下載歷史紀錄，讓它們可以被重新下載
         if missing_videos:
@@ -1685,7 +1707,7 @@ class MainWindow(QMainWindow):
             auto_reply = QMessageBox.question(
                 self,
                 "自動下載",
-                f"偵測到 {summary}，是否立即下載?",
+                f"{title_prefix}偵測到 {summary}，是否立即下載?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if auto_reply == QMessageBox.StandardButton.Yes:
@@ -1709,7 +1731,13 @@ class MainWindow(QMainWindow):
         if not self.playlist_radio.isChecked():
             QMessageBox.information(self, "提示", "請先選擇播放清單模式並填入網址。")
             return
-        self.detect_playlist_updates(playlist_url, download_path, prompt_user=True, manual_trigger=True)
+        self.detect_playlist_updates(
+            playlist_url,
+            download_path,
+            prompt_user=True,
+            manual_trigger=True,
+            remember=self.remember_playlist_check.isChecked(),
+        )
 
     def collect_known_playlists(self) -> list[dict[str, str]]:
         playlist_jobs = []
@@ -1718,7 +1746,12 @@ class MainWindow(QMainWindow):
                 url = info.get("playlist_url")
                 if url:
                     playlist_jobs.append(
-                        {"download_path": download_path, "playlist_id": playlist_id, "playlist_url": url}
+                        {
+                            "download_path": download_path,
+                            "playlist_id": playlist_id,
+                            "playlist_url": url,
+                            "playlist_title": info.get("playlist_title", ""),
+                        }
                     )
         return playlist_jobs
 
@@ -1732,12 +1765,15 @@ class MainWindow(QMainWindow):
         self.log_to_overview(f" 開始批次檢查 {len(playlist_jobs)} 個播放清單...")
         updates_found = 0
         for job in playlist_jobs:
+            job_title = job.get("playlist_title") or job["playlist_id"]
+            self.log_to_overview(f"  檢查中: {job_title}")
             result = self.detect_playlist_updates(
                 job["playlist_url"],
                 job["download_path"],
                 prompt_user=True,
                 manual_trigger=manual_trigger,
                 show_no_change_message=show_no_change_message,
+                remember=True,
             )
             if result.get("status") in ("proceed", "manual"):
                 updates_found += 1
@@ -2063,17 +2099,27 @@ A: 確認 URL 正確無誤，嘗試重新下載。
         except OSError:
             pass
 
-    def update_playlist_state(self, download_path: str, playlist_id: str, playlist_url: str, video_ids: list[str]):
+    def update_playlist_state(
+        self,
+        download_path: str,
+        playlist_id: str,
+        playlist_url: str,
+        video_ids: list[str],
+        playlist_title: str = "",
+    ):
         download_path = self.normalize_path(download_path)
         if not download_path or not playlist_id:
             return
         if download_path not in self.playlist_states:
             self.playlist_states[download_path] = {}
-        self.playlist_states[download_path][playlist_id] = {
+        state = {
             "playlist_url": playlist_url,
             "video_ids": video_ids,
             "last_checked": datetime.datetime.now().isoformat(),
         }
+        if playlist_title:
+            state["playlist_title"] = playlist_title
+        self.playlist_states[download_path][playlist_id] = state
         self.save_playlist_states()
 
     def add_to_download_history(self, download_path: str, video_id: str, url: str, title: str = ""):
@@ -2143,6 +2189,7 @@ A: 確認 URL 正確無誤，嘗試重新下載。
         )
         self.trim_filename_spin.setValue(int(self.settings.value("trim_filename_length", 120)))
         self.trim_filename_spin.setEnabled(self.auto_trim_filename_check.isChecked())
+        self.remember_playlist_check.setChecked(str(self.settings.value("remember_playlist", "true")).lower() == "true")
 
     def save_settings(self):
         self.settings.setValue("download_path", self.download_path_edit.text())
@@ -2153,6 +2200,7 @@ A: 確認 URL 正確無誤，嘗試重新下載。
         self.settings.setValue("custom_filename_template", self.custom_filename_edit.text())
         self.settings.setValue("auto_trim_filename", self.auto_trim_filename_check.isChecked())
         self.settings.setValue("trim_filename_length", self.trim_filename_spin.value())
+        self.settings.setValue("remember_playlist", self.remember_playlist_check.isChecked())
 
     def closeEvent(self, event):
         for worker in self.workers:

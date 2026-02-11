@@ -149,6 +149,11 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.5.0 (2026-02-12)
+- 🆕 新增「記憶此播放清單」選項：使用者可自行決定是否記錄播放清單供日後追蹤更新
+- 🆕 檢查播放清單時對話框顯示播放清單名稱，批次檢查多個清單時可清楚辨別
+- 🔧 播放清單狀態儲存新增標題欄位，批次檢查日誌顯示各清單名稱
+
 ### v0.4.5 (2026-02-06)
 - 🐛 修正 YouTube n-challenge 仍然失敗的問題：加入 `--remote-components ejs:github` 下載遠端 challenge solver 腳本
 - 🔧 TV player variant + remote EJS solver 雙重修正，徹底解決 `Requested format is not available` 錯誤
