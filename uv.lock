@@ -380,7 +380,7 @@ wheels = [
 [[package]]
 name = "video-downloader-pyside6"
 version = "0.6.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "pyside6" },
     { name = "yt-dlp" },

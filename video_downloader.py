@@ -412,6 +412,27 @@ class CookieManager:
             return False, {"error": f"驗證錯誤: {str(e)}"}
 
 
+# ==================== 通用非同步 Worker ====================
+class AsyncWorker(QThread):
+    """在背景執行緒中執行任意 callable，完成後發射信號回到主執行緒。"""
+
+    finished = Signal(object)  # 回傳結果
+    error = Signal(str)  # 錯誤訊息
+
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self._fn = fn
+        self._args = args
+        self._kwargs = kwargs
+
+    def run(self):
+        try:
+            result = self._fn(*self._args, **self._kwargs)
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 # ==================== 下載訊號類別 ====================
 class DownloadSignals(QObject):
     """下載進度信號"""
@@ -868,6 +889,7 @@ class MainWindow(QMainWindow):
         self.resize(1600, 900)
 
         self.workers = []
+        self._async_workers = []
         self.global_seen_ids = set()
         self._seen_ids_lock = threading.Lock()
         self._history_lock = threading.Lock()
@@ -1444,25 +1466,39 @@ class MainWindow(QMainWindow):
         output_file = f"{platform}_cookies_{timestamp}.txt"
 
         if platform == "youtube":
-            success, message = self.cookie_manager.extract_firefox_cookies_youtube(output_file)
-            if success:
-                self.youtube_cookie_file = os.path.abspath(output_file)
-                self.youtube_cookie_edit.setText(self.youtube_cookie_file)
-                self.log_to_overview(" YouTube Cookies 提取成功")
-                QMessageBox.information(self, "成功", f"YouTube Cookies 提取成功！\n\n{message}")
-            else:
-                self.log_to_overview(f" YouTube Cookies 提取失敗: {message}")
-                QMessageBox.warning(self, "失敗", f"Cookie 提取失敗\n\n{message}")
+            fn = self.cookie_manager.extract_firefox_cookies_youtube
         elif platform == "bilibili":
-            success, message = self.cookie_manager.extract_firefox_cookies_bilibili(output_file)
-            if success:
-                self.bilibili_cookie_file = os.path.abspath(output_file)
-                self.bilibili_cookie_edit.setText(self.bilibili_cookie_file)
-                self.log_to_overview(" Bilibili Cookies 提取完成")
-                QMessageBox.information(self, "提取完成", f"Bilibili Cookies 已提取\n\n{message}")
-            else:
-                self.log_to_overview(f" Bilibili Cookies 提取失敗: {message}")
-                QMessageBox.warning(self, "失敗", f"Cookie 提取失敗\n\n{message}")
+            fn = self.cookie_manager.extract_firefox_cookies_bilibili
+        else:
+            return
+
+        worker = AsyncWorker(fn, output_file)
+
+        def on_done(result):
+            success, message = result
+            if platform == "youtube":
+                if success:
+                    self.youtube_cookie_file = os.path.abspath(output_file)
+                    self.youtube_cookie_edit.setText(self.youtube_cookie_file)
+                    self.log_to_overview(" YouTube Cookies 提取成功")
+                    QMessageBox.information(self, "成功", f"YouTube Cookies 提取成功！\n\n{message}")
+                else:
+                    self.log_to_overview(f" YouTube Cookies 提取失敗: {message}")
+                    QMessageBox.warning(self, "失敗", f"Cookie 提取失敗\n\n{message}")
+            elif platform == "bilibili":
+                if success:
+                    self.bilibili_cookie_file = os.path.abspath(output_file)
+                    self.bilibili_cookie_edit.setText(self.bilibili_cookie_file)
+                    self.log_to_overview(" Bilibili Cookies 提取完成")
+                    QMessageBox.information(self, "提取完成", f"Bilibili Cookies 已提取\n\n{message}")
+                else:
+                    self.log_to_overview(f" Bilibili Cookies 提取失敗: {message}")
+                    QMessageBox.warning(self, "失敗", f"Cookie 提取失敗\n\n{message}")
+
+        worker.finished.connect(on_done)
+        worker.error.connect(lambda e: self.log_to_overview(f" Cookie 提取錯誤: {e}"))
+        self._keep_worker_alive(worker)
+        worker.start()
 
     def test_cookies(self, platform: str):
         self.log_to_overview(f"🔍 測試 {platform.upper()} Cookies...")
@@ -1471,28 +1507,45 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "警告", "請先提取 YouTube Cookies")
                 self.update_cookie_status("youtube", None)
                 return
-            valid, message = self.cookie_manager.validate_youtube_cookies(self.youtube_cookie_file)
-            self.update_cookie_status("youtube", valid)
-            if valid:
-                self.log_to_overview("✅ YouTube Cookies 有效")
-                QMessageBox.information(self, "成功", "YouTube Cookies 有效且可用！")
-            else:
-                self.log_to_overview(f"❌ YouTube Cookies 無效: {message}")
-                QMessageBox.warning(self, "失敗", f"YouTube Cookies 無效\n{message}")
+            worker = AsyncWorker(self.cookie_manager.validate_youtube_cookies, self.youtube_cookie_file)
+
+            def on_yt_done(result):
+                valid, message = result
+                self.update_cookie_status("youtube", valid)
+                if valid:
+                    self.log_to_overview("✅ YouTube Cookies 有效")
+                    QMessageBox.information(self, "成功", "YouTube Cookies 有效且可用！")
+                else:
+                    self.log_to_overview(f"❌ YouTube Cookies 無效: {message}")
+                    QMessageBox.warning(self, "失敗", f"YouTube Cookies 無效\n{message}")
+
+            worker.finished.connect(on_yt_done)
+
         elif platform == "bilibili":
             if not self.bilibili_cookie_file:
                 QMessageBox.warning(self, "警告", "請先提取 Bilibili Cookies")
                 self.update_cookie_status("bilibili", None)
                 return
-            valid, info = self.cookie_manager.validate_bilibili_cookies(self.bilibili_cookie_file)
-            self.update_cookie_status("bilibili", valid)
-            if valid:
-                self.log_to_overview("✅ Bilibili Cookies 有效")
-                QMessageBox.information(self, "成功", "Bilibili Cookies 有效且可用！")
-            else:
-                error = info.get("error", "未知錯誤")
-                self.log_to_overview(f"❌ Bilibili Cookies 無效: {error}")
-                QMessageBox.warning(self, "失敗", f"Bilibili Cookies 無效\n{error}")
+            worker = AsyncWorker(self.cookie_manager.validate_bilibili_cookies, self.bilibili_cookie_file)
+
+            def on_bili_done(result):
+                valid, info = result
+                self.update_cookie_status("bilibili", valid)
+                if valid:
+                    self.log_to_overview("✅ Bilibili Cookies 有效")
+                    QMessageBox.information(self, "成功", "Bilibili Cookies 有效且可用！")
+                else:
+                    error = info.get("error", "未知錯誤")
+                    self.log_to_overview(f"❌ Bilibili Cookies 無效: {error}")
+                    QMessageBox.warning(self, "失敗", f"Bilibili Cookies 無效\n{error}")
+
+            worker.finished.connect(on_bili_done)
+        else:
+            return
+
+        worker.error.connect(lambda e: self.log_to_overview(f" Cookie 測試錯誤: {e}"))
+        self._keep_worker_alive(worker)
+        worker.start()
 
     def start_download(self):
         self.log_to_overview("=" * 50)
@@ -1510,39 +1563,77 @@ class MainWindow(QMainWindow):
 
         if self.playlist_radio.isChecked() and len(urls) == 1:
             playlist_url = urls[0]
-            detection = self.detect_playlist_updates(
-                playlist_url,
-                download_path,
-                prompt_user=True,
-                offer_auto_download=False,
-                remember=self.remember_playlist_check.isChecked(),
-            )
-            if detection.get("status") == "cancel":
-                return
+            remember = self.remember_playlist_check.isChecked()
+            self.log_to_overview(" 取得播放清單資訊中...")
+            self.statusBar().showMessage("取得播放清單資訊中...")
 
-            # 展開播放清單為個別影片 URL，逐一下載以正確追蹤進度
-            video_ids = detection.get("video_ids", [])
-            expanded, skipped = self._expand_playlist_urls(
-                playlist_url, video_ids=video_ids or None, download_path=download_path
-            )
-            if expanded:
-                urls = expanded
-                msg = f" 展開播放清單：{len(expanded)} 部影片待下載"
-                if skipped:
-                    msg += f"（已跳過 {skipped} 部已下載）"
-                self.log_to_overview(msg)
-            elif skipped > 0:
-                self.log_to_overview(f" 所有 {skipped} 部影片已下載過")
-                QMessageBox.information(self, "提示", "所有影片已下載過，無需再次下載。")
-                return
+            def fetch_task():
+                metadata = self.fetch_playlist_metadata(playlist_url)
+                return {"metadata": metadata, "playlist_url": playlist_url, "download_path": download_path}
 
+            worker = AsyncWorker(fetch_task)
+            worker.finished.connect(lambda result: self._on_playlist_fetched_for_download(result, remember))
+            worker.error.connect(lambda e: self.log_to_overview(f" 播放清單取得失敗: {e}"))
+            self._keep_worker_alive(worker)
+            worker.start()
+            return
+
+        self._proceed_download(urls, download_path)
+
+    def _on_playlist_fetched_for_download(self, result: dict, remember: bool):
+        """播放清單 metadata 取得完成後的 UI 邏輯（主執行緒）"""
+        metadata = result["metadata"]
+        playlist_url = result["playlist_url"]
+        download_path = result["download_path"]
+        self.statusBar().clearMessage()
+
+        if not metadata:
+            self.log_to_overview(" 無法取得播放清單資訊")
+            QMessageBox.warning(self, "錯誤", "無法取得播放清單資訊")
+            return
+
+        detection = self._process_playlist_detection(
+            playlist_url,
+            download_path,
+            metadata,
+            prompt_user=True,
+            offer_auto_download=False,
+            remember=remember,
+        )
+        if detection.get("status") == "cancel":
+            return
+
+        video_ids = detection.get("video_ids", [])
+        expanded, skipped = self._expand_playlist_urls_from_ids(
+            playlist_url, video_ids=video_ids, download_path=download_path
+        )
+        if expanded:
+            urls = expanded
+            msg = f" 展開播放清單：{len(expanded)} 部影片待下載"
+            if skipped:
+                msg += f"（已跳過 {skipped} 部已下載）"
+            self.log_to_overview(msg)
+        elif skipped > 0:
+            self.log_to_overview(f" 所有 {skipped} 部影片已下載過")
+            QMessageBox.information(self, "提示", "所有影片已下載過，無需再次下載。")
+            return
+        else:
+            urls = [playlist_url]
+
+        self._proceed_download(urls, download_path)
+
+    def _proceed_download(self, urls: list[str], download_path: str):
+        """驗證設定後建立下載任務（UI 操作，主執行緒）"""
         if self.use_cookies_check.isChecked():
-            self.auto_extract_cookies_if_needed(urls)
+            self._auto_extract_cookies_async(urls, lambda: self._finalize_download(urls, download_path))
+        else:
+            self._finalize_download(urls, download_path)
 
+    def _finalize_download(self, urls: list[str], download_path: str):
+        """最終建立任務"""
         settings = self.build_download_settings(download_path)
         if not settings:
             return
-
         task_id = len(self.workers) + 1
         self.create_task(task_id, urls, settings)
 
@@ -1596,24 +1687,58 @@ class MainWindow(QMainWindow):
         return platforms
 
     def auto_extract_cookies_if_needed(self, urls: list[str]):
+        """同步版本（已棄用，保留相容性）"""
+        self._auto_extract_cookies_async(urls)
+
+    def _auto_extract_cookies_async(self, urls: list[str], on_complete=None):
+        """非同步提取所需的 Cookies，完成後呼叫 on_complete。"""
         platforms = self.detect_platforms_from_urls(urls)
+        tasks = []
+
         if "youtube" in platforms and (not self.youtube_cookie_file or not os.path.exists(self.youtube_cookie_file)):
-            self.log_to_overview(" YouTube Cookie 未設定，自動提取...")
             timestamp = int(time.time())
-            output_file = f"youtube_cookies_{timestamp}.txt"
-            success, _ = self.cookie_manager.extract_firefox_cookies_youtube(output_file)
-            if success:
-                self.youtube_cookie_file = os.path.abspath(output_file)
-                self.youtube_cookie_edit.setText(self.youtube_cookie_file)
+            tasks.append(("youtube", f"youtube_cookies_{timestamp}.txt"))
 
         if "bilibili" in platforms and (not self.bilibili_cookie_file or not os.path.exists(self.bilibili_cookie_file)):
-            self.log_to_overview(" Bilibili Cookie 未設定，自動提取...")
             timestamp = int(time.time())
-            output_file = f"bilibili_cookies_{timestamp}.txt"
-            success, _ = self.cookie_manager.extract_firefox_cookies_bilibili(output_file)
-            if success:
-                self.bilibili_cookie_file = os.path.abspath(output_file)
-                self.bilibili_cookie_edit.setText(self.bilibili_cookie_file)
+            tasks.append(("bilibili", f"bilibili_cookies_{timestamp}.txt"))
+
+        if not tasks:
+            if on_complete:
+                on_complete()
+            return
+
+        remaining = [len(tasks)]
+
+        def make_handler(platform, output_file):
+            def handler(result):
+                success, _ = result
+                if success:
+                    if platform == "youtube":
+                        self.youtube_cookie_file = os.path.abspath(output_file)
+                        self.youtube_cookie_edit.setText(self.youtube_cookie_file)
+                        self.log_to_overview(" YouTube Cookie 自動提取成功")
+                    elif platform == "bilibili":
+                        self.bilibili_cookie_file = os.path.abspath(output_file)
+                        self.bilibili_cookie_edit.setText(self.bilibili_cookie_file)
+                        self.log_to_overview(" Bilibili Cookie 自動提取成功")
+                remaining[0] -= 1
+                if remaining[0] <= 0 and on_complete:
+                    on_complete()
+
+            return handler
+
+        for platform, output_file in tasks:
+            self.log_to_overview(f" {platform.upper()} Cookie 未設定，自動提取...")
+            if platform == "youtube":
+                fn = self.cookie_manager.extract_firefox_cookies_youtube
+            else:
+                fn = self.cookie_manager.extract_firefox_cookies_bilibili
+            worker = AsyncWorker(fn, output_file)
+            worker.finished.connect(make_handler(platform, output_file))
+            worker.error.connect(lambda e, p=platform: self.log_to_overview(f" {p} Cookie 提取錯誤: {e}"))
+            self._keep_worker_alive(worker)
+            worker.start()
 
     def fetch_playlist_metadata(self, playlist_url: str) -> dict | None:
         try:
@@ -1627,6 +1752,13 @@ class MainWindow(QMainWindow):
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             return None
 
+    def _keep_worker_alive(self, worker: AsyncWorker):
+        """保持 worker 引用，防止被 GC 回收；完成後自動清除。"""
+        self._async_workers = getattr(self, "_async_workers", [])
+        self._async_workers.append(worker)
+        worker.finished.connect(lambda: self._async_workers.remove(worker) if worker in self._async_workers else None)
+        worker.error.connect(lambda: self._async_workers.remove(worker) if worker in self._async_workers else None)
+
     def detect_playlist_updates(
         self,
         playlist_url: str,
@@ -1637,22 +1769,57 @@ class MainWindow(QMainWindow):
         offer_auto_download: bool = True,
         remember: bool = True,
     ) -> dict:
+        """非同步版本 — 啟動背景取得 metadata，回傳 {"status": "async"}。"""
         if not playlist_url or not download_path:
             return {"status": "error"}
 
-        normalized_path = self.normalize_path(download_path)
-        metadata = self.fetch_playlist_metadata(playlist_url)
+        self.log_to_overview(" 取得播放清單資訊中...")
+        self.statusBar().showMessage("取得播放清單資訊中...")
+
+        worker = AsyncWorker(self.fetch_playlist_metadata, playlist_url)
+
+        def on_done(metadata):
+            self.statusBar().clearMessage()
+            self._process_playlist_detection(
+                playlist_url,
+                download_path,
+                metadata,
+                prompt_user=prompt_user,
+                manual_trigger=manual_trigger,
+                show_no_change_message=show_no_change_message,
+                offer_auto_download=offer_auto_download,
+                remember=remember,
+            )
+            # 如果是 offer_auto_download 流程，已在內部處理
+
+        worker.finished.connect(on_done)
+        worker.error.connect(lambda e: self.log_to_overview(f" 播放清單取得失敗: {e}"))
+        self._keep_worker_alive(worker)
+        worker.start()
+        return {"status": "async"}
+
+    def _process_playlist_detection(
+        self,
+        playlist_url: str,
+        download_path: str,
+        metadata: dict | None,
+        prompt_user: bool = True,
+        manual_trigger: bool = False,
+        show_no_change_message: bool = True,
+        offer_auto_download: bool = True,
+        remember: bool = True,
+    ) -> dict:
+        """處理播放清單偵測邏輯（純 UI + 本地資料，在主執行緒呼叫）。"""
         if not metadata:
             return {"status": "error", "reason": "fetch-failed"}
 
+        normalized_path = self.normalize_path(download_path)
         entries = metadata.get("entries") or []
         if not entries:
             return {"status": "error", "reason": "empty"}
 
-        # 取得播放清單標題，用於對話框顯示
         playlist_title = metadata.get("title", "")
 
-        # 過濾被作者刪除或設為私人的影片（無法下載）
         unavailable_titles = {"[deleted video]", "[private video]"}
         available_entries = [e for e in entries if (e.get("title") or "").strip().lower() not in unavailable_titles]
 
@@ -1665,7 +1832,6 @@ class MainWindow(QMainWindow):
         added_videos = [{"id": vid, "title": ""} for vid in current_ids if vid not in prev_ids]
         removed_ids = [vid for vid in prev_ids if vid not in current_ids]
 
-        # 檢查本地檔案缺失的影片（在清單中但檔案已被刪除）
         missing_videos = []
         for vid in current_ids:
             if vid in prev_ids and not self._has_local_file_for_video(normalized_path, vid):
@@ -1673,7 +1839,6 @@ class MainWindow(QMainWindow):
 
         has_changes = bool(added_videos or removed_ids or missing_videos)
 
-        # 對話框中顯示的播放清單名稱前綴
         title_prefix = f"【{playlist_title}】\n" if playlist_title else ""
 
         if not has_changes:
@@ -1685,7 +1850,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "偵測結果", f"{title_prefix}播放清單沒有新影片。")
             return {"status": "no-change", "video_ids": current_ids}
 
-        # 組合提示訊息
         msg_parts = []
         if added_videos:
             msg_parts.append(f"{len(added_videos)} 部新影片")
@@ -1708,7 +1872,6 @@ class MainWindow(QMainWindow):
                 normalized_path, playlist_id, playlist_url, current_ids, playlist_title=playlist_title
             )
 
-        # 清除缺失影片的下載歷史紀錄，讓它們可以被重新下載
         if missing_videos:
             with self._history_lock:
                 for vid_info in missing_videos:
@@ -1739,11 +1902,37 @@ class MainWindow(QMainWindow):
 
     def auto_download_playlist(self, playlist_url: str, download_path: str):
         settings = self.build_download_settings(download_path)
-        if settings:
-            expanded, _ = self._expand_playlist_urls(playlist_url, download_path=download_path)
-            urls = expanded if expanded else [playlist_url]
+        if not settings:
+            return
+
+        def fetch_and_expand():
+            metadata = self.fetch_playlist_metadata(playlist_url)
+            if not metadata:
+                return None
+            entries = metadata.get("entries") or []
+            unavailable_titles = {"[deleted video]", "[private video]"}
+            video_ids = [
+                e.get("id") or e.get("url")
+                for e in entries
+                if (e.get("id") or e.get("url")) and (e.get("title") or "").strip().lower() not in unavailable_titles
+            ]
+            return video_ids
+
+        worker = AsyncWorker(fetch_and_expand)
+
+        def on_done(video_ids):
+            if video_ids:
+                expanded, _ = self._expand_playlist_urls_from_ids(playlist_url, video_ids, download_path)
+                urls = expanded if expanded else [playlist_url]
+            else:
+                urls = [playlist_url]
             task_id = len(self.workers) + 1
             self.create_task(task_id, urls, settings)
+
+        worker.finished.connect(on_done)
+        worker.error.connect(lambda e: self.log_to_overview(f" 播放清單展開失敗: {e}"))
+        self._keep_worker_alive(worker)
+        worker.start()
 
     def _expand_playlist_urls(
         self,
@@ -1751,16 +1940,7 @@ class MainWindow(QMainWindow):
         video_ids: list[str] | None = None,
         download_path: str = "",
     ) -> tuple[list[str], int]:
-        """將播放清單展開為個別影片 URL，過濾已下載影片。
-
-        Args:
-            playlist_url: 播放清單網址
-            video_ids: 已取得的影片 ID 列表（可省略，會自動取得）
-            download_path: 下載路徑（用於已下載判斷）
-
-        Returns:
-            (展開的 URL 列表, 跳過數量)
-        """
+        """將播放清單展開為個別影片 URL（可能阻塞，僅在背景執行緒使用）。"""
         if not video_ids:
             metadata = self.fetch_playlist_metadata(playlist_url)
             if not metadata:
@@ -1773,6 +1953,15 @@ class MainWindow(QMainWindow):
                 if (e.get("id") or e.get("url")) and (e.get("title") or "").strip().lower() not in unavailable_titles
             ]
 
+        return self._expand_playlist_urls_from_ids(playlist_url, video_ids, download_path)
+
+    def _expand_playlist_urls_from_ids(
+        self,
+        playlist_url: str,
+        video_ids: list[str],
+        download_path: str = "",
+    ) -> tuple[list[str], int]:
+        """從已知 video_ids 展開為 URL 列表（純本地運算，不阻塞）。"""
         platform = PlatformUtils.detect_platform(playlist_url)
         normalized_path = self.normalize_path(download_path)
         expanded = []
@@ -1825,23 +2014,44 @@ class MainWindow(QMainWindow):
             return
 
         self.log_to_overview(f" 開始批次檢查 {len(playlist_jobs)} 個播放清單...")
-        updates_found = 0
-        for job in playlist_jobs:
-            job_title = job.get("playlist_title") or job["playlist_id"]
-            self.log_to_overview(f"  檢查中: {job_title}")
-            result = self.detect_playlist_updates(
-                job["playlist_url"],
-                job["download_path"],
-                prompt_user=True,
-                manual_trigger=manual_trigger,
-                show_no_change_message=show_no_change_message,
-                remember=True,
-            )
-            if result.get("status") in ("proceed", "manual"):
-                updates_found += 1
+        self.statusBar().showMessage(f"批次檢查 {len(playlist_jobs)} 個播放清單中...")
 
-        if manual_trigger:
-            QMessageBox.information(self, "播放清單檢查", f"批次檢查完成，共偵測到 {updates_found} 個播放清單有變動。")
+        def fetch_all():
+            results = []
+            for job in playlist_jobs:
+                metadata = self.fetch_playlist_metadata(job["playlist_url"])
+                results.append((job, metadata))
+            return results
+
+        worker = AsyncWorker(fetch_all)
+
+        def on_done(results):
+            self.statusBar().clearMessage()
+            updates_found = 0
+            for job, metadata in results:
+                job_title = job.get("playlist_title") or job["playlist_id"]
+                self.log_to_overview(f"  處理中: {job_title}")
+                result = self._process_playlist_detection(
+                    job["playlist_url"],
+                    job["download_path"],
+                    metadata,
+                    prompt_user=True,
+                    manual_trigger=manual_trigger,
+                    show_no_change_message=show_no_change_message,
+                    remember=True,
+                )
+                if result.get("status") in ("proceed", "manual"):
+                    updates_found += 1
+
+            if manual_trigger:
+                QMessageBox.information(
+                    self, "播放清單檢查", f"批次檢查完成，共偵測到 {updates_found} 個播放清單有變動。"
+                )
+
+        worker.finished.connect(on_done)
+        worker.error.connect(lambda e: self.log_to_overview(f" 批次檢查失敗: {e}"))
+        self._keep_worker_alive(worker)
+        worker.start()
 
     def manual_check_all_playlists(self):
         self.check_all_playlists(manual_trigger=True, show_no_change_message=False)
