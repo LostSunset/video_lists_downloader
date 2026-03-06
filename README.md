@@ -151,6 +151,10 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.7.5 (2026-03-06)
+- 🐛 修正下載影片沒有聲音的根本原因：`bv*+ba*/b` 格式選擇器在 yt-dlp 2026.03.03 只選取影片軌而忽略音訊軌
+- 🔧 格式選擇器改為 `bestvideo+bestaudio/best`，確保影片和音訊分別下載後正確合併
+
 ### v0.7.4 (2026-03-06)
 - 🐛 修正下載影片沒有聲音的問題：加入 `--merge-output-format mp4` 強制合併為 MP4 容器
 - 🔧 避免 webm/mkv 容器中 Opus 音訊在部分播放器無法播放的相容性問題

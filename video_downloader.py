@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.7.4"
+APP_VERSION = "v0.7.5"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -565,7 +565,7 @@ class DownloadWorker(QThread):
         if self.format_id:
             cmd.extend(["-f", self.format_id])
         else:
-            cmd.extend(["-f", "bv*+ba*/b"])
+            cmd.extend(["-f", "bestvideo+bestaudio/best"])
         cmd.extend(["--merge-output-format", "mp4"])
         if self.include_subs:
             cmd.extend(
@@ -821,12 +821,12 @@ class BatchDownloadWorker(QThread):
 
         quality = (self.settings.get("quality") or "best").strip().lower()
         if quality == "best":
-            cmd.extend(["-f", "bv*+ba*/b"])
+            cmd.extend(["-f", "bestvideo+bestaudio/best"])
         elif quality == "worst":
-            cmd.extend(["-f", "wv*+wa*/w"])
+            cmd.extend(["-f", "worstvideo+worstaudio/worst"])
         elif quality in CONSTANTS.QUALITY_CAPS:
             height = CONSTANTS.QUALITY_CAPS[quality]
-            cmd.extend(["-f", f"bv*[height<={height}]+ba*/b[height<={height}]"])
+            cmd.extend(["-f", f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"])
         else:
             cmd.extend(["-f", quality])
         cmd.extend(["--merge-output-format", "mp4"])
