@@ -151,6 +151,11 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.7.0 (2026-03-06)
+- 🆕 所有阻塞 UI 的操作改為非同步執行，介面不再卡頓
+- 🔧 Cookie 提取/驗證、播放清單取得、批次檢查皆在背景執行緒運行
+- 🔧 下載啟動流程完全非阻塞，透過 callback chain 串接
+
 ### v0.6.0 (2026-03-06)
 - 🆕 自動下載/更新 yt-dlp 和 ffmpeg 到專案 `bin/` 資料夾，免手動安裝
 - 🆕 啟動時自動檢查 yt-dlp 新版本，有更新才下載；ffmpeg 首次自動下載
