@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.7.0"
+APP_VERSION = "v0.7.1"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -559,6 +559,8 @@ class DownloadWorker(QThread):
             cmd.extend(["--limit-rate", self.rate_limit])
         if self.cookie_file and os.path.exists(self.cookie_file):
             cmd.extend(["--cookies", self.cookie_file])
+        else:
+            cmd.extend(["--cookies-from-browser", "firefox"])
         if platform == "youtube":
             cmd.extend(["--extractor-args", "youtube:player_js_variant=tv"])
             cmd.extend(["--remote-components", "ejs:github"])
@@ -1624,10 +1626,7 @@ class MainWindow(QMainWindow):
 
     def _proceed_download(self, urls: list[str], download_path: str):
         """驗證設定後建立下載任務（UI 操作，主執行緒）"""
-        if self.use_cookies_check.isChecked():
-            self._auto_extract_cookies_async(urls, lambda: self._finalize_download(urls, download_path))
-        else:
-            self._finalize_download(urls, download_path)
+        self._finalize_download(urls, download_path)
 
     def _finalize_download(self, urls: list[str], download_path: str):
         """最終建立任務"""
@@ -1742,7 +1741,19 @@ class MainWindow(QMainWindow):
 
     def fetch_playlist_metadata(self, playlist_url: str) -> dict | None:
         try:
-            cmd = [bin_manager.get_ytdlp_path(), "-J", "--flat-playlist", playlist_url]
+            cmd = [bin_manager.get_ytdlp_path(), "-J", "--flat-playlist"]
+            # 使用 cookie 檔案或直接從瀏覽器讀取
+            platform = PlatformUtils.detect_platform(playlist_url)
+            cookie_file = ""
+            if platform == "youtube":
+                cookie_file = self.youtube_cookie_file
+            elif platform == "bilibili":
+                cookie_file = self.bilibili_cookie_file
+            if cookie_file and os.path.exists(cookie_file):
+                cmd.extend(["--cookies", cookie_file])
+            else:
+                cmd.extend(["--cookies-from-browser", "firefox"])
+            cmd.append(playlist_url)
             result = subprocess.run(
                 cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180
             )

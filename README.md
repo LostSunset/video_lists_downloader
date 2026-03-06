@@ -151,6 +151,11 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.7.1 (2026-03-06)
+- 🐛 修正「Cookie 未設定，自動提取」卡住的問題
+- 🔧 所有 yt-dlp 指令（下載、播放清單查詢）在沒有 cookie 檔案時自動使用 `--cookies-from-browser firefox`
+- 🔧 移除下載前的自動 cookie 提取流程，不再阻塞啟動
+
 ### v0.7.0 (2026-03-06)
 - 🆕 所有阻塞 UI 的操作改為非同步執行，介面不再卡頓
 - 🔧 Cookie 提取/驗證、播放清單取得、批次檢查皆在背景執行緒運行
