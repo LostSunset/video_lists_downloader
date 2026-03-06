@@ -151,6 +151,10 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.7.4 (2026-03-06)
+- 🐛 修正下載影片沒有聲音的問題：加入 `--merge-output-format mp4` 強制合併為 MP4 容器
+- 🔧 避免 webm/mkv 容器中 Opus 音訊在部分播放器無法播放的相容性問題
+
 ### v0.7.3 (2026-03-06)
 - 🐛 修正 YouTube n-challenge 解碼失敗導致 `Requested format is not available` 的根本原因
 - 🔧 所有 yt-dlp 呼叫統一使用 `get_base_ytdlp_cmd()`，確保 `--js-runtimes node` 和 `--remote-components ejs:github` 一致套用

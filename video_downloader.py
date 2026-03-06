@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.7.3"
+APP_VERSION = "v0.7.4"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -566,6 +566,7 @@ class DownloadWorker(QThread):
             cmd.extend(["-f", self.format_id])
         else:
             cmd.extend(["-f", "bv*+ba*/b"])
+        cmd.extend(["--merge-output-format", "mp4"])
         if self.include_subs:
             cmd.extend(
                 [
@@ -828,6 +829,7 @@ class BatchDownloadWorker(QThread):
             cmd.extend(["-f", f"bv*[height<={height}]+ba*/b[height<={height}]"])
         else:
             cmd.extend(["-f", quality])
+        cmd.extend(["--merge-output-format", "mp4"])
 
         if self.settings.get("download_subtitle"):
             cmd.append("--write-subs")
