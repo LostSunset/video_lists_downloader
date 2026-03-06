@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "video-downloader-pyside6"
-version = "0.7.1"
+version = "0.7.2"
 description = "影片批量下載工具 - 支援 YouTube 與 Bilibili 平台"
 readme = "README.md"
 license = "MIT"

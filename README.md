@@ -151,6 +151,10 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.7.2 (2026-03-06)
+- 🐛 修正 `Requested format is not available` 錯誤
+- 🔧 所有格式選擇器改用寬鬆語法 (`bv*+ba*/b`)，相容 `player_js_variant=tv` 回傳的格式
+
 ### v0.7.1 (2026-03-06)
 - 🐛 修正「Cookie 未設定，自動提取」卡住的問題
 - 🔧 所有 yt-dlp 指令（下載、播放清單查詢）在沒有 cookie 檔案時自動使用 `--cookies-from-browser firefox`
