@@ -39,6 +39,7 @@ python video_downloader.py
 - 🍪 Cookie 狀態指示（🟢有效 🟡未驗證 🔴無效）
 - 🔄 自動重試機制
 - 💡 完整的 Tooltip 說明
+- 📦 自動下載/更新 yt-dlp 和 ffmpeg（免手動安裝）
 
 ### ⌨️ 鍵盤快捷鍵
 
@@ -61,8 +62,8 @@ python video_downloader.py
 
 - Python 3.10+
 - PySide6
-- yt-dlp (用於下載)
-- ffmpeg (用於合併影片，可選)
+- yt-dlp（啟動時自動下載/更新）
+- ffmpeg（啟動時自動下載）
 
 ### 開發
 
@@ -105,6 +106,7 @@ python video_downloader.py
 - 🍪 Cookie status indicators (🟢valid 🟡unverified 🔴invalid)
 - 🔄 Auto-retry mechanism
 - 💡 Comprehensive tooltips
+- 📦 Auto-download/update yt-dlp and ffmpeg (no manual install needed)
 
 ### ⌨️ Keyboard Shortcuts
 
@@ -127,8 +129,8 @@ python video_downloader.py
 
 - Python 3.10+
 - PySide6
-- yt-dlp (for downloading)
-- ffmpeg (for merging, optional)
+- yt-dlp (auto-downloaded/updated on startup)
+- ffmpeg (auto-downloaded on startup)
 
 ### Development
 
@@ -148,6 +150,11 @@ ruff check .
 ## 版本歷史 | Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
+
+### v0.6.0 (2026-03-06)
+- 🆕 自動下載/更新 yt-dlp 和 ffmpeg 到專案 `bin/` 資料夾，免手動安裝
+- 🆕 啟動時自動檢查 yt-dlp 新版本，有更新才下載；ffmpeg 首次自動下載
+- 🔧 所有 yt-dlp 呼叫自動使用本地 bin 路徑，並透過 `--ffmpeg-location` 指定 ffmpeg 位置
 
 ### v0.5.2 (2026-02-12)
 - 🐛 修正啟用檔名修剪時 `[%(id)s]` 被截斷導致不同影片產生相同檔名、互相覆蓋的問題

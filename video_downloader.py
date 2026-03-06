@@ -59,7 +59,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_VERSION = "v0.5.2"
+import bin_manager
+
+APP_VERSION = "v0.6.0"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -265,7 +267,7 @@ class CookieManager:
             for method in test_urls:
                 try:
                     result = subprocess.run(
-                        ["yt-dlp"] + method["args"],
+                        [bin_manager.get_ytdlp_path()] + method["args"],
                         capture_output=True,
                         text=True,
                         encoding="utf-8",
@@ -379,7 +381,7 @@ class CookieManager:
         try:
             result = subprocess.run(
                 [
-                    "yt-dlp",
+                    bin_manager.get_ytdlp_path(),
                     "--cookies",
                     cookie_file,
                     "--print",
@@ -533,13 +535,16 @@ class DownloadWorker(QThread):
     def _build_command(self, platform: str) -> list[str]:
         """建立下載命令"""
         cmd = [
-            "yt-dlp",
+            bin_manager.get_ytdlp_path(),
             "-o",
             os.path.join(self.output_dir, "%(title)s.%(ext)s"),
             "--no-playlist",
             "--progress",
             "--newline",
         ]
+        ffmpeg_dir = bin_manager.get_ffmpeg_dir()
+        if ffmpeg_dir:
+            cmd.extend(["--ffmpeg-location", ffmpeg_dir])
         if self.rate_limit:
             cmd.extend(["--limit-rate", self.rate_limit])
         if self.cookie_file and os.path.exists(self.cookie_file):
@@ -778,7 +783,10 @@ class BatchDownloadWorker(QThread):
 
     def _build_ytdlp_command(self, url: str, platform: str) -> list[str]:
         """建構 yt-dlp 指令"""
-        cmd = ["yt-dlp"]
+        cmd = [bin_manager.get_ytdlp_path()]
+        ffmpeg_dir = bin_manager.get_ffmpeg_dir()
+        if ffmpeg_dir:
+            cmd.extend(["--ffmpeg-location", ffmpeg_dir])
 
         if self.settings.get("use_cookies"):
             cookie_file = self.settings.get(f"{platform}_cookie_file")
@@ -1620,7 +1628,7 @@ class MainWindow(QMainWindow):
 
     def fetch_playlist_metadata(self, playlist_url: str) -> dict | None:
         try:
-            cmd = ["yt-dlp", "-J", "--flat-playlist", playlist_url]
+            cmd = [bin_manager.get_ytdlp_path(), "-J", "--flat-playlist", playlist_url]
             result = subprocess.run(
                 cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180
             )
@@ -1938,21 +1946,10 @@ class MainWindow(QMainWindow):
         self.overview_log.append(f"[{timestamp}] {message}")
 
     def check_dependencies(self):
-        self.log_to_overview(" 檢查 yt-dlp...")
+        self.log_to_overview(" 檢查 yt-dlp / ffmpeg...")
 
         def check():
-            try:
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp[default]"],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                )
-                if result.returncode == 0:
-                    self.log_to_overview(" yt-dlp 已更新")
-            except (OSError, subprocess.SubprocessError) as e:
-                self.log_to_overview(f" 檢查 yt-dlp 錯誤: {e}")
+            bin_manager.check_and_update(log_cb=self.log_to_overview)
 
         threading.Thread(target=check, daemon=True).start()
 

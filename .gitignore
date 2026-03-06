@@ -47,6 +47,9 @@ video_downloader_pyside6_v*.py
 影片批量下載工具_v*.py
 README_PyQt6.md
 
+# Local binaries (yt-dlp, ffmpeg)
+bin/
+
 # OS
 .DS_Store
 Thumbs.db
