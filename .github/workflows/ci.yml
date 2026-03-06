@@ -39,7 +39,7 @@ jobs:
 
       - name: Type check with mypy
         run: |
-          mypy video_downloader.py --ignore-missing-imports
+          mypy video_downloader.py bin_manager.py --ignore-missing-imports
         continue-on-error: true
 
       - name: Test with pytest

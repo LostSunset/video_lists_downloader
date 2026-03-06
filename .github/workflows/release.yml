@@ -44,17 +44,20 @@ jobs:
           name: Release ${{ steps.get_version.outputs.VERSION }}
           body: |
             ## 變更內容
-            
-            請參閱 [CHANGELOG.md](https://github.com/LostSunset/video_lists_downloader/blob/main/CHANGELOG.md) 了解詳細變更。
-            
+
+            請參閱 [README.md](https://github.com/LostSunset/video_lists_downloader#版本歷史--changelog) 了解詳細變更。
+
             ## 安裝方式
-            
+
             ```bash
-            pip install PySide6 yt-dlp
+            uv sync
             python video_downloader.py
             ```
+
+            yt-dlp 和 ffmpeg 會在啟動時自動下載到 `bin/` 資料夾。
           draft: false
           prerelease: false
           files: |
             video_downloader.py
+            bin_manager.py
             LICENSE
