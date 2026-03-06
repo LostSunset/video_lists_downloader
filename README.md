@@ -151,6 +151,12 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.7.3 (2026-03-06)
+- 🐛 修正 YouTube n-challenge 解碼失敗導致 `Requested format is not available` 的根本原因
+- 🔧 所有 yt-dlp 呼叫統一使用 `get_base_ytdlp_cmd()`，確保 `--js-runtimes node` 和 `--remote-components ejs:github` 一致套用
+- 🔧 自動下載 Node.js 到 `bin/` 資料夾，供 yt-dlp JavaScript challenge solver 使用
+- 🔧 Cookie 提取與驗證、播放清單查詢等所有子程序皆正確傳遞 JS runtime 參數
+
 ### v0.7.2 (2026-03-06)
 - 🐛 修正 `Requested format is not available` 錯誤
 - 🔧 所有格式選擇器改用寬鬆語法 (`bv*+ba*/b`)，相容 `player_js_variant=tv` 回傳的格式

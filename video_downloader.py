@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.7.2"
+APP_VERSION = "v0.7.3"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -256,12 +256,13 @@ class CookieManager:
             for method in test_urls:
                 try:
                     result = subprocess.run(
-                        [bin_manager.get_ytdlp_path()] + method["args"],
+                        bin_manager.get_base_ytdlp_cmd() + method["args"],
                         capture_output=True,
                         text=True,
                         encoding="utf-8",
                         errors="replace",
                         timeout=45,
+                        env=bin_manager.get_ytdlp_env(),
                     )
                     if result.returncode == 0 and os.path.exists(output_file):
                         file_size = os.path.getsize(output_file)
@@ -369,8 +370,8 @@ class CookieManager:
             return False, "Cookie 檔案不存在"
         try:
             result = subprocess.run(
-                [
-                    bin_manager.get_ytdlp_path(),
+                bin_manager.get_base_ytdlp_cmd()
+                + [
                     "--cookies",
                     cookie_file,
                     "--print",
@@ -384,6 +385,7 @@ class CookieManager:
                 encoding="utf-8",
                 errors="replace",
                 timeout=15,
+                env=bin_manager.get_ytdlp_env(),
             )
             return (True, "Cookies 有效") if result.returncode == 0 else (False, "Cookies 無效或已過期")
         except subprocess.TimeoutExpired:
@@ -528,6 +530,7 @@ class DownloadWorker(QThread):
                 errors="replace",
                 startupinfo=startupinfo,
                 bufsize=1,
+                env=bin_manager.get_ytdlp_env(),
             )
             for line in iter(self.process.stdout.readline, ""):
                 if self._is_cancelled:
@@ -544,27 +547,20 @@ class DownloadWorker(QThread):
 
     def _build_command(self, platform: str) -> list[str]:
         """建立下載命令"""
-        cmd = [
-            bin_manager.get_ytdlp_path(),
+        cmd = bin_manager.get_base_ytdlp_cmd() + [
             "-o",
             os.path.join(self.output_dir, "%(title)s.%(ext)s"),
             "--no-playlist",
             "--progress",
             "--newline",
         ]
-        ffmpeg_dir = bin_manager.get_ffmpeg_dir()
-        if ffmpeg_dir:
-            cmd.extend(["--ffmpeg-location", ffmpeg_dir])
         if self.rate_limit:
             cmd.extend(["--limit-rate", self.rate_limit])
         if self.cookie_file and os.path.exists(self.cookie_file):
             cmd.extend(["--cookies", self.cookie_file])
         else:
             cmd.extend(["--cookies-from-browser", "firefox"])
-        if platform == "youtube":
-            cmd.extend(["--extractor-args", "youtube:player_js_variant=tv"])
-            cmd.extend(["--remote-components", "ejs:github"])
-        elif platform == "bilibili":
+        if platform == "bilibili":
             cmd.extend(["--referer", "https://www.bilibili.com", "--add-header", "Origin:https://www.bilibili.com"])
         if self.format_id:
             cmd.extend(["-f", self.format_id])
@@ -703,6 +699,7 @@ class BatchDownloadWorker(QThread):
                 errors="replace",
                 cwd=self.settings.get("download_path"),
                 bufsize=1,
+                env=bin_manager.get_ytdlp_env(),
             )
 
             last_progress = ""
@@ -795,17 +792,13 @@ class BatchDownloadWorker(QThread):
 
     def _build_ytdlp_command(self, url: str, platform: str) -> list[str]:
         """建構 yt-dlp 指令"""
-        cmd = [bin_manager.get_ytdlp_path()]
-        ffmpeg_dir = bin_manager.get_ffmpeg_dir()
-        if ffmpeg_dir:
-            cmd.extend(["--ffmpeg-location", ffmpeg_dir])
+        cmd = bin_manager.get_base_ytdlp_cmd()
 
         if self.settings.get("use_cookies"):
             cookie_file = self.settings.get(f"{platform}_cookie_file")
             if cookie_file and os.path.exists(cookie_file):
                 cmd.extend(["--cookies", cookie_file])
             else:
-                # Cookie 檔案不存在時，直接從瀏覽器讀取（避免 403 錯誤）
                 cmd.extend(["--cookies-from-browser", "firefox"])
 
         if self.settings.get("download_path"):
@@ -853,10 +846,6 @@ class BatchDownloadWorker(QThread):
             cmd.extend(["--trim-filenames", str(trim_length)])
 
         cmd.extend(["--no-warnings", "--ignore-errors", "--retries", "3", "--fragment-retries", "10"])
-
-        if platform == "youtube":
-            cmd.extend(["--extractor-args", "youtube:player_js_variant=tv"])
-            cmd.extend(["--remote-components", "ejs:github"])
 
         if platform == "bilibili":
             cmd.extend(
@@ -1741,7 +1730,7 @@ class MainWindow(QMainWindow):
 
     def fetch_playlist_metadata(self, playlist_url: str) -> dict | None:
         try:
-            cmd = [bin_manager.get_ytdlp_path(), "-J", "--flat-playlist"]
+            cmd = bin_manager.get_base_ytdlp_cmd() + ["-J", "--flat-playlist"]
             # 使用 cookie 檔案或直接從瀏覽器讀取
             platform = PlatformUtils.detect_platform(playlist_url)
             cookie_file = ""
@@ -1755,7 +1744,13 @@ class MainWindow(QMainWindow):
                 cmd.extend(["--cookies-from-browser", "firefox"])
             cmd.append(playlist_url)
             result = subprocess.run(
-                cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=180,
+                env=bin_manager.get_ytdlp_env(),
             )
             if result.returncode != 0:
                 return None
