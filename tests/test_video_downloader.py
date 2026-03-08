@@ -498,7 +498,7 @@ class TestDownloadWorkerBuildCommand:
         )
         cmd = worker._build_command("youtube")
 
-        assert cmd[0] == "yt-dlp"
+        assert "yt-dlp" in cmd[0]
         assert "-o" in cmd
         assert "--no-playlist" in cmd
         assert "--progress" in cmd
@@ -652,7 +652,7 @@ class TestBatchDownloadWorkerBuildCommand:
         worker = BatchDownloadWorker(task_id=1, urls=["https://www.youtube.com/watch?v=test"], settings=settings)
         cmd = worker._build_ytdlp_command("https://www.youtube.com/watch?v=test", "youtube")
 
-        assert cmd[0] == "yt-dlp"
+        assert "yt-dlp" in cmd[0]
         assert cmd[-1] == "https://www.youtube.com/watch?v=test"
         assert "--no-warnings" in cmd
         assert "--ignore-errors" in cmd

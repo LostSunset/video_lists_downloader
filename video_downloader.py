@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any
 
-from PySide6.QtCore import QObject, QSettings, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QFont, QKeySequence, QShortcut
+from PySide6.QtCore import QObject, QSettings, QSize, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QDesktopServices, QDragEnterEvent, QDropEvent, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.7.5"
+APP_VERSION = "v0.8.0"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -1184,6 +1184,11 @@ class MainWindow(QMainWindow):
         browse_btn.setToolTip("選擇下載目標資料夾 (Ctrl+O)")
         layout.addWidget(browse_btn)
 
+        open_folder_btn = QPushButton("開啟")
+        open_folder_btn.clicked.connect(self.open_download_folder)
+        open_folder_btn.setToolTip("在檔案總管中開啟下載資料夾")
+        layout.addWidget(open_folder_btn)
+
         group.setLayout(layout)
         return group
 
@@ -1452,6 +1457,13 @@ class MainWindow(QMainWindow):
         dir_path = QFileDialog.getExistingDirectory(self, "選擇下載資料夾", "", QFileDialog.Option.ShowDirsOnly)
         if dir_path:
             self.download_path_edit.setText(dir_path)
+
+    def open_download_folder(self):
+        folder = self.download_path_edit.text().strip()
+        if folder and os.path.isdir(folder):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+        else:
+            QMessageBox.warning(self, "警告", "請先選擇有效的下載路徑。")
 
     def extract_cookies(self, platform: str):
         self.log_to_overview(f" 開始提取 {platform.upper()} Cookies...")

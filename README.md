@@ -151,6 +151,10 @@ ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.8.0 (2026-03-08)
+- 🆕 新增「開啟」按鈕，一鍵在檔案總管中開啟下載資料夾
+- 🐛 修正 yt-dlp 改用本地 bin 路徑後測試斷言失敗的問題
+
 ### v0.7.5 (2026-03-06)
 - 🐛 修正下載影片沒有聲音的根本原因：`bv*+ba*/b` 格式選擇器在 yt-dlp 2026.03.03 只選取影片軌而忽略音訊軌
 - 🔧 格式選擇器改為 `bestvideo+bestaudio/best`，確保影片和音訊分別下載後正確合併
