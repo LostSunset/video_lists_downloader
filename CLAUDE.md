@@ -89,7 +89,7 @@ When releasing a new version, update:
 
 - **Keyboard Shortcuts**: Ctrl+Enter (download), Ctrl+Shift+V (paste), F1 (help), Ctrl+O (path), Ctrl+Q (quit)
 - **Drag & Drop**: URLs and .txt files
-- **Cookie Status**: 🟢 valid, 🟡 unverified, 🔴 invalid
+- **Cookie Status**: 🟢 valid, 🟡 unverified, 🔴 invalid (auto-fallback to no-cookie when browser cookies unavailable)
 - **Playlist Path Change Detection**: Prompts user when playlist download path differs from previous location
 - **Export**: CSV/HTML download reports
 
