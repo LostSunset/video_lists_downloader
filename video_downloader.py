@@ -1910,30 +1910,23 @@ class MainWindow(QMainWindow):
         remember: bool = True,
     ) -> dict:
         """處理播放清單偵測邏輯（純 UI + 本地資料，在主執行緒呼叫）。"""
-        if not metadata:
-            return {"status": "error", "reason": "fetch-failed"}
-
+        # 先檢查下載路徑（不依賴 metadata，即使抓取失敗也能處理路徑問題）
         normalized_path = self.normalize_path(download_path)
-        entries = metadata.get("entries") or []
-        if not entries:
-            return {"status": "error", "reason": "empty"}
-
-        playlist_title = metadata.get("title", "")
-
-        # 檢查下載路徑：不存在則詢問新路徑，存在但與 UI 路徑不同則詢問是否更改
+        playlist_title = (metadata.get("title", "") if metadata else "") or download_path
         ui_path = self.normalize_path(self.download_path_edit.text())
+
         if normalized_path and not os.path.isdir(normalized_path):
-            title_display = playlist_title or download_path
-            chosen = self._prompt_missing_playlist_path(title_display, download_path)
+            chosen = self._prompt_missing_playlist_path(playlist_title, download_path)
             if chosen is None:
                 return {"status": "cancel"}
             old_normalized = normalized_path
             download_path = chosen
             normalized_path = self.normalize_path(download_path)
-            # 將舊路徑的播放清單狀態與下載歷史遷移到新路徑
             self._migrate_playlist_path(old_normalized, normalized_path)
         elif normalized_path and ui_path and normalized_path != ui_path:
-            playlist_id_tmp = metadata.get("id") or PlatformUtils.extract_playlist_id(playlist_url)
+            playlist_id_tmp = (metadata.get("id") if metadata else None) or PlatformUtils.extract_playlist_id(
+                playlist_url
+            )
             chosen = self._prompt_playlist_path_change(playlist_title, playlist_id_tmp, normalized_path, ui_path)
             if chosen is None:
                 return {"status": "cancel"}
@@ -1942,6 +1935,13 @@ class MainWindow(QMainWindow):
                 download_path = chosen
                 normalized_path = self.normalize_path(download_path)
                 self._migrate_playlist_path(old_normalized, normalized_path)
+
+        if not metadata:
+            return {"status": "error", "reason": "fetch-failed"}
+
+        entries = metadata.get("entries") or []
+        if not entries:
+            return {"status": "error", "reason": "empty"}
 
         unavailable_titles = {"[deleted video]", "[private video]"}
         available_entries = [e for e in entries if (e.get("title") or "").strip().lower() not in unavailable_titles]
