@@ -1624,6 +1624,18 @@ class MainWindow(QMainWindow):
         else:
             return None
 
+    def _migrate_playlist_path(self, old_normalized: str, new_normalized: str):
+        """將播放清單狀態與下載歷史從舊路徑遷移到新路徑。"""
+        if old_normalized == new_normalized:
+            return
+        if old_normalized in self.playlist_states:
+            self.playlist_states.setdefault(new_normalized, {}).update(self.playlist_states.pop(old_normalized))
+            self.save_playlist_states()
+        with self._history_lock:
+            if old_normalized in self.download_history:
+                self.download_history.setdefault(new_normalized, {}).update(self.download_history.pop(old_normalized))
+                self.save_download_history()
+
     def _prompt_missing_playlist_path(self, playlist_title: str, old_path: str) -> str | None:
         """當播放清單的下載路徑不存在時，詢問使用者選擇新路徑。回傳選擇的路徑，或 None 表示取消。"""
         msg = QMessageBox(self)
@@ -1908,7 +1920,8 @@ class MainWindow(QMainWindow):
 
         playlist_title = metadata.get("title", "")
 
-        # 檢查下載路徑是否仍然存在，若不存在則詢問使用者選擇新路徑
+        # 檢查下載路徑：不存在則詢問新路徑，存在但與 UI 路徑不同則詢問是否更改
+        ui_path = self.normalize_path(self.download_path_edit.text())
         if normalized_path and not os.path.isdir(normalized_path):
             title_display = playlist_title or download_path
             chosen = self._prompt_missing_playlist_path(title_display, download_path)
@@ -1918,15 +1931,17 @@ class MainWindow(QMainWindow):
             download_path = chosen
             normalized_path = self.normalize_path(download_path)
             # 將舊路徑的播放清單狀態與下載歷史遷移到新路徑
-            if old_normalized in self.playlist_states:
-                self.playlist_states.setdefault(normalized_path, {}).update(self.playlist_states.pop(old_normalized))
-                self.save_playlist_states()
-            with self._history_lock:
-                if old_normalized in self.download_history:
-                    self.download_history.setdefault(normalized_path, {}).update(
-                        self.download_history.pop(old_normalized)
-                    )
-                    self.save_download_history()
+            self._migrate_playlist_path(old_normalized, normalized_path)
+        elif normalized_path and ui_path and normalized_path != ui_path:
+            playlist_id_tmp = metadata.get("id") or PlatformUtils.extract_playlist_id(playlist_url)
+            chosen = self._prompt_playlist_path_change(playlist_title, playlist_id_tmp, normalized_path, ui_path)
+            if chosen is None:
+                return {"status": "cancel"}
+            if self.normalize_path(chosen) != normalized_path:
+                old_normalized = normalized_path
+                download_path = chosen
+                normalized_path = self.normalize_path(download_path)
+                self._migrate_playlist_path(old_normalized, normalized_path)
 
         unavailable_titles = {"[deleted video]", "[private video]"}
         available_entries = [e for e in entries if (e.get("title") or "").strip().lower() not in unavailable_titles]
