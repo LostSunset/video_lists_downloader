@@ -1624,6 +1624,20 @@ class MainWindow(QMainWindow):
         else:
             return None
 
+    def _prompt_missing_playlist_path(self, playlist_title: str, old_path: str) -> str | None:
+        """當播放清單的下載路徑不存在時，詢問使用者選擇新路徑。回傳選擇的路徑，或 None 表示取消。"""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("下載路徑不存在")
+        msg.setText(f"播放清單【{playlist_title}】的下載路徑已不存在：\n　{old_path}\n\n請選擇新的下載位置：")
+        browse_btn = msg.addButton("選擇新位置...", QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton("跳過", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+
+        if msg.clickedButton() == browse_btn:
+            chosen = QFileDialog.getExistingDirectory(self, "選擇下載路徑")
+            return chosen if chosen else None
+        return None
+
     def _on_playlist_fetched_for_download(self, result: dict, remember: bool):
         """播放清單 metadata 取得完成後的 UI 邏輯（主執行緒）"""
         metadata = result["metadata"]
@@ -1893,6 +1907,26 @@ class MainWindow(QMainWindow):
             return {"status": "error", "reason": "empty"}
 
         playlist_title = metadata.get("title", "")
+
+        # 檢查下載路徑是否仍然存在，若不存在則詢問使用者選擇新路徑
+        if normalized_path and not os.path.isdir(normalized_path):
+            title_display = playlist_title or download_path
+            chosen = self._prompt_missing_playlist_path(title_display, download_path)
+            if chosen is None:
+                return {"status": "cancel"}
+            old_normalized = normalized_path
+            download_path = chosen
+            normalized_path = self.normalize_path(download_path)
+            # 將舊路徑的播放清單狀態與下載歷史遷移到新路徑
+            if old_normalized in self.playlist_states:
+                self.playlist_states.setdefault(normalized_path, {}).update(self.playlist_states.pop(old_normalized))
+                self.save_playlist_states()
+            with self._history_lock:
+                if old_normalized in self.download_history:
+                    self.download_history.setdefault(normalized_path, {}).update(
+                        self.download_history.pop(old_normalized)
+                    )
+                    self.save_download_history()
 
         unavailable_titles = {"[deleted video]", "[private video]"}
         available_entries = [e for e in entries if (e.get("title") or "").strip().lower() not in unavailable_titles]
