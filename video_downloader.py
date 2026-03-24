@@ -1846,6 +1846,18 @@ class MainWindow(QMainWindow):
                 timeout=180,
                 env=bin_manager.get_ytdlp_env(),
             )
+            # 若 cookie 導致失敗，以無 cookie 重試
+            if result.returncode != 0:
+                cmd_no_cookie = bin_manager.get_base_ytdlp_cmd() + ["-J", "--flat-playlist", playlist_url]
+                result = subprocess.run(
+                    cmd_no_cookie,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=180,
+                    env=bin_manager.get_ytdlp_env(),
+                )
             if result.returncode != 0:
                 return None
             return json.loads(result.stdout)
