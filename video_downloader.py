@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.8.0"
+APP_VERSION = "v0.9.0"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -1585,6 +1585,45 @@ class MainWindow(QMainWindow):
 
         self._proceed_download(urls, download_path)
 
+    def _find_previous_playlist_path(self, playlist_id: str, current_path: str) -> str | None:
+        """檢查播放清單是否曾經下載到其他路徑，回傳先前路徑或 None。"""
+        normalized_current = self.normalize_path(current_path)
+        for path, playlists in self.playlist_states.items():
+            if playlist_id in playlists and self.normalize_path(path) != normalized_current:
+                return path
+        return None
+
+    def _prompt_playlist_path_change(
+        self, playlist_title: str, playlist_id: str, previous_path: str, current_path: str
+    ) -> str | None:
+        """當播放清單路徑變更時，詢問使用者要下載到哪裡。回傳選擇的路徑，或 None 表示取消。"""
+        title_display = playlist_title or playlist_id
+        msg = QMessageBox(self)
+        msg.setWindowTitle("播放清單位置已變更")
+        msg.setText(
+            f"播放清單【{title_display}】先前下載至：\n"
+            f"　{previous_path}\n\n"
+            f"目前選擇的路徑為：\n"
+            f"　{current_path}\n\n"
+            f"請選擇要下載到哪個位置："
+        )
+        use_previous_btn = msg.addButton("使用原路徑", QMessageBox.ButtonRole.YesRole)
+        use_current_btn = msg.addButton("使用新路徑", QMessageBox.ButtonRole.NoRole)
+        browse_btn = msg.addButton("瀏覽其他位置...", QMessageBox.ButtonRole.ActionRole)
+        msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked == use_previous_btn:
+            return previous_path
+        elif clicked == use_current_btn:
+            return current_path
+        elif clicked == browse_btn:
+            chosen = QFileDialog.getExistingDirectory(self, "選擇下載路徑", current_path)
+            return chosen if chosen else None
+        else:
+            return None
+
     def _on_playlist_fetched_for_download(self, result: dict, remember: bool):
         """播放清單 metadata 取得完成後的 UI 邏輯（主執行緒）"""
         metadata = result["metadata"]
@@ -1596,6 +1635,21 @@ class MainWindow(QMainWindow):
             self.log_to_overview(" 無法取得播放清單資訊")
             QMessageBox.warning(self, "錯誤", "無法取得播放清單資訊")
             return
+
+        # 檢查播放清單是否曾下載到其他路徑
+        playlist_id = metadata.get("id") or PlatformUtils.extract_playlist_id(playlist_url)
+        if playlist_id:
+            previous_path = self._find_previous_playlist_path(playlist_id, download_path)
+            if previous_path:
+                playlist_title = metadata.get("title", "")
+                chosen_path = self._prompt_playlist_path_change(
+                    playlist_title, playlist_id, previous_path, download_path
+                )
+                if chosen_path is None:
+                    self.log_to_overview(" 使用者取消下載")
+                    return
+                download_path = chosen_path
+                self.download_path_edit.setText(download_path)
 
         detection = self._process_playlist_detection(
             playlist_url,
