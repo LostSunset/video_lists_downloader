@@ -13,6 +13,23 @@
 
 ## 版本紀錄
 
+### 2026-05-14 - v0.10.0
+
+- 作者/工具：Codex
+- 類型：feat / test
+- 摘要：
+  - 新增已記住播放清單管理 UI，可載入、單獨檢查、開啟資料夾與移除追蹤記錄。
+  - 批次檢查所有清單新增進度列、目前檢查項目與取消檢查按鈕。
+  - 批次檢查改用可取消的背景 worker，取消後將未處理清單納入摘要。
+  - 新增 helper 與回歸測試覆蓋管理清單資料、移除清單、批次進度與取消行為。
+- 驗證：
+  - `uv run ruff check .` 通過。
+  - `uv run python -m py_compile video_downloader.py bin_manager.py` 通過。
+  - `uv run pytest -q` 通過，93 tests passed。
+  - PySide offscreen UI smoke check 通過。
+- 後續事項：
+  - 可進一步改善任務分頁關閉時的 worker 狀態提示與完成彈窗頻率。
+
 ### 2026-05-14 - v0.9.3
 
 - 作者/工具：Codex

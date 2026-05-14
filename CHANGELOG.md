@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-05-14
+
+### Added
+- 新增「已記住播放清單」管理 UI，可查看已追蹤清單、載入清單、單獨檢查、開啟下載資料夾與移除追蹤記錄。
+- 「檢查所有播放清單」新增進度列、目前檢查項目與取消檢查按鈕。
+- 新增 helper 與回歸測試覆蓋已記住清單整理、移除、批次 metadata 抓取進度與取消摘要。
+
+### Changed
+- 批次檢查所有清單改用 `PlaylistBatchCheckWorker`，支援 cooperative cancellation 與逐項進度更新。
+- 取消批次檢查時，尚未處理的清單會以 `cancel` 狀態進入彙總摘要。
+
 ## [0.9.3] - 2026-05-14
 
 ### Fixed

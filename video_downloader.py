@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -52,7 +54,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.9.3"
+APP_VERSION = "v0.10.0"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -297,6 +299,84 @@ def summarize_playlist_check_results(results: list[dict]) -> dict:
         lines.extend(f"- {title}" for title in cancelled_titles)
     summary["message"] = "\n".join(lines)
     return summary
+
+
+def build_remembered_playlist_rows(playlist_states: dict) -> list[dict]:
+    """Build normalized rows for the remembered playlist management UI."""
+    rows = []
+    for download_path, playlists in (playlist_states or {}).items():
+        if not isinstance(playlists, dict):
+            continue
+        for playlist_id, info in playlists.items():
+            if not isinstance(info, dict):
+                continue
+            title = str(info.get("playlist_title") or playlist_id or "未命名清單")
+            video_ids = info.get("video_ids") if isinstance(info.get("video_ids"), list) else []
+            video_count = len(video_ids)
+            row = {
+                "download_path": download_path,
+                "playlist_id": playlist_id,
+                "playlist_url": info.get("playlist_url", ""),
+                "title": title,
+                "video_count": video_count,
+                "last_checked": info.get("last_checked", ""),
+            }
+            row["display"] = f"{title} ({video_count} 部)\n{download_path}"
+            rows.append(row)
+    return sorted(rows, key=lambda row: (row["title"].lower(), row["download_path"], row["playlist_id"]))
+
+
+def remove_remembered_playlist(playlist_states: dict, download_path: str, playlist_id: str) -> bool:
+    """Remove one remembered playlist tracking record while leaving download history intact."""
+    if download_path not in playlist_states or playlist_id not in playlist_states.get(download_path, {}):
+        return False
+    del playlist_states[download_path][playlist_id]
+    if not playlist_states[download_path]:
+        del playlist_states[download_path]
+    return True
+
+
+def fetch_playlist_batch_metadata(
+    playlist_jobs: list[dict],
+    fetch_metadata,
+    should_cancel=None,
+    on_progress=None,
+) -> tuple[list[tuple[dict, dict | None]], bool]:
+    """Fetch playlist metadata sequentially with progress and cooperative cancellation."""
+    results = []
+    total = len(playlist_jobs)
+    for index, job in enumerate(playlist_jobs, start=1):
+        if should_cancel and should_cancel():
+            return results, True
+        title = job.get("playlist_title") or job.get("playlist_id") or job.get("playlist_url") or "未命名清單"
+        if on_progress:
+            on_progress(index, total, str(title))
+        metadata = fetch_metadata(job["playlist_url"])
+        results.append((job, metadata))
+    return results, False
+
+
+def append_cancelled_playlist_results(playlist_jobs: list[dict], processed_results: list[dict]):
+    """Append cancel results for playlist jobs that did not produce a processed result."""
+    processed_keys = {
+        (result.get("download_path", ""), result.get("playlist_id", ""), result.get("playlist_url", ""))
+        for result in processed_results
+    }
+    for job in playlist_jobs:
+        key = (job.get("download_path", ""), job.get("playlist_id", ""), job.get("playlist_url", ""))
+        fallback_key = (job.get("download_path", ""), job.get("playlist_id", ""), "")
+        if key in processed_keys or fallback_key in processed_keys:
+            continue
+        processed_results.append(
+            {
+                "status": "cancel",
+                "reason": "cancelled",
+                "download_path": job.get("download_path", ""),
+                "playlist_id": job.get("playlist_id", ""),
+                "playlist_url": job.get("playlist_url", ""),
+                "playlist_title": job.get("playlist_title") or job.get("playlist_id") or "未命名清單",
+            }
+        )
 
 
 # ==================== 下載統計 ====================
@@ -606,6 +686,38 @@ class AsyncWorker(QThread):
         try:
             result = self._fn(*self._args, **self._kwargs)
             self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class PlaylistBatchCheckWorker(QThread):
+    """Fetch remembered playlist metadata with progress and cooperative cancellation."""
+
+    progress_update = Signal(int, int, str)
+    batch_finished = Signal(object, bool)
+    error = Signal(str)
+
+    def __init__(self, playlist_jobs: list[dict], fetch_metadata):
+        super().__init__()
+        self.playlist_jobs = playlist_jobs
+        self.fetch_metadata = fetch_metadata
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def is_cancelled(self) -> bool:
+        return self._is_cancelled
+
+    def run(self):
+        try:
+            results, cancelled = fetch_playlist_batch_metadata(
+                self.playlist_jobs,
+                self.fetch_metadata,
+                should_cancel=self.is_cancelled,
+                on_progress=self.progress_update.emit,
+            )
+            self.batch_finished.emit(results, cancelled)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -1080,6 +1192,7 @@ class MainWindow(QMainWindow):
         self.global_seen_ids = set()
         self._seen_ids_lock = threading.Lock()
         self._history_lock = threading.Lock()
+        self.batch_check_worker: PlaylistBatchCheckWorker | None = None
         self.cookie_manager = CookieManager(self)
         self.settings = QSettings("VideoDownloader", "PySide6App")
 
@@ -1098,6 +1211,7 @@ class MainWindow(QMainWindow):
         self.load_download_history()
         self.load_playlist_states()
         self.load_playlist_updates_log()
+        self.refresh_remembered_playlist_list()
 
         QTimer.singleShot(1000, self.check_dependencies)
         QTimer.singleShot(2000, self.auto_check_all_playlists_on_start)
@@ -1262,6 +1376,7 @@ class MainWindow(QMainWindow):
 
         scroll_layout.addWidget(self.create_platform_group())
         scroll_layout.addWidget(self.create_input_group())
+        scroll_layout.addWidget(self.create_remembered_playlists_group())
         scroll_layout.addWidget(self.create_path_group())
         scroll_layout.addWidget(self.create_download_settings_group())
         scroll_layout.addWidget(self.create_cookie_group())
@@ -1351,6 +1466,47 @@ class MainWindow(QMainWindow):
         group.setLayout(layout)
         return group
 
+    def create_remembered_playlists_group(self) -> QGroupBox:
+        group = QGroupBox("已記住播放清單")
+        layout = QVBoxLayout()
+
+        self.remembered_playlist_count_label = QLabel("0 個清單")
+        layout.addWidget(self.remembered_playlist_count_label)
+
+        self.remembered_playlist_list = QListWidget()
+        self.remembered_playlist_list.setMinimumHeight(130)
+        self.remembered_playlist_list.itemSelectionChanged.connect(self.update_remembered_playlist_buttons)
+        self.remembered_playlist_list.itemDoubleClicked.connect(lambda _: self.load_selected_remembered_playlist())
+        layout.addWidget(self.remembered_playlist_list)
+
+        first_row = QHBoxLayout()
+        self.load_remembered_playlist_btn = QPushButton("載入")
+        self.load_remembered_playlist_btn.clicked.connect(self.load_selected_remembered_playlist)
+        first_row.addWidget(self.load_remembered_playlist_btn)
+
+        self.check_remembered_playlist_btn = QPushButton("檢查")
+        self.check_remembered_playlist_btn.clicked.connect(self.check_selected_remembered_playlist)
+        first_row.addWidget(self.check_remembered_playlist_btn)
+        layout.addLayout(first_row)
+
+        second_row = QHBoxLayout()
+        self.open_remembered_playlist_folder_btn = QPushButton("開啟")
+        self.open_remembered_playlist_folder_btn.clicked.connect(self.open_selected_remembered_playlist_folder)
+        second_row.addWidget(self.open_remembered_playlist_folder_btn)
+
+        self.remove_remembered_playlist_btn = QPushButton("移除")
+        self.remove_remembered_playlist_btn.clicked.connect(self.remove_selected_remembered_playlist)
+        second_row.addWidget(self.remove_remembered_playlist_btn)
+
+        self.refresh_remembered_playlist_btn = QPushButton("重新整理")
+        self.refresh_remembered_playlist_btn.clicked.connect(self.refresh_remembered_playlist_list)
+        second_row.addWidget(self.refresh_remembered_playlist_btn)
+        layout.addLayout(second_row)
+
+        group.setLayout(layout)
+        self.update_remembered_playlist_buttons()
+        return group
+
     def _on_single_url_changed(self, text: str):
         """當單一影片 URL 變更時自動偵測類型"""
         if text.strip():
@@ -1365,6 +1521,104 @@ class MainWindow(QMainWindow):
         """當播放清單 URL 變更時自動選擇"""
         if text.strip():
             self.playlist_radio.setChecked(True)
+
+    def refresh_remembered_playlist_list(self):
+        if not hasattr(self, "remembered_playlist_list"):
+            return
+
+        selected = self.get_selected_remembered_playlist()
+        selected_key = None
+        if selected:
+            selected_key = (selected.get("download_path"), selected.get("playlist_id"))
+
+        self.remembered_playlist_list.clear()
+        rows = build_remembered_playlist_rows(self.playlist_states)
+        for row in rows:
+            item = QListWidgetItem(row["display"])
+            item.setData(Qt.ItemDataRole.UserRole, row)
+            tooltip = f"{row['title']}\n{row['playlist_url']}\n{row['download_path']}"
+            if row.get("last_checked"):
+                tooltip += f"\n最後檢查: {row['last_checked']}"
+            item.setToolTip(tooltip)
+            self.remembered_playlist_list.addItem(item)
+            if selected_key == (row.get("download_path"), row.get("playlist_id")):
+                self.remembered_playlist_list.setCurrentItem(item)
+
+        self.remembered_playlist_count_label.setText(f"{len(rows)} 個清單")
+        self.update_remembered_playlist_buttons()
+
+    def get_selected_remembered_playlist(self) -> dict | None:
+        if not hasattr(self, "remembered_playlist_list"):
+            return None
+        item = self.remembered_playlist_list.currentItem()
+        if not item:
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def update_remembered_playlist_buttons(self):
+        has_selection = self.get_selected_remembered_playlist() is not None
+        for attr in [
+            "load_remembered_playlist_btn",
+            "check_remembered_playlist_btn",
+            "open_remembered_playlist_folder_btn",
+            "remove_remembered_playlist_btn",
+        ]:
+            if hasattr(self, attr):
+                getattr(self, attr).setEnabled(has_selection)
+
+    def load_selected_remembered_playlist(self):
+        row = self.get_selected_remembered_playlist()
+        if not row:
+            return
+        if not row.get("playlist_url"):
+            QMessageBox.warning(self, "已記住播放清單", "此播放清單缺少網址，無法載入。")
+            return
+        self.playlist_radio.setChecked(True)
+        self.playlist_url_edit.setText(row["playlist_url"])
+        self.download_path_edit.setText(row["download_path"])
+        self.log_to_overview(f" 已載入播放清單: {row['title']}")
+
+    def check_selected_remembered_playlist(self):
+        row = self.get_selected_remembered_playlist()
+        if not row:
+            return
+        self.playlist_radio.setChecked(True)
+        self.playlist_url_edit.setText(row["playlist_url"])
+        self.download_path_edit.setText(row["download_path"])
+        self.detect_playlist_updates(
+            row["playlist_url"],
+            row["download_path"],
+            prompt_user=True,
+            manual_trigger=True,
+            remember=True,
+        )
+
+    def open_selected_remembered_playlist_folder(self):
+        row = self.get_selected_remembered_playlist()
+        if not row:
+            return
+        path = row["download_path"]
+        if not os.path.isdir(path):
+            QMessageBox.warning(self, "已記住播放清單", f"下載路徑不存在:\n{path}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def remove_selected_remembered_playlist(self):
+        row = self.get_selected_remembered_playlist()
+        if not row:
+            return
+        reply = QMessageBox.question(
+            self,
+            "移除播放清單記錄",
+            f"確定要移除【{row['title']}】的追蹤記錄嗎？\n下載歷史與本地檔案會保留。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if remove_remembered_playlist(self.playlist_states, row["download_path"], row["playlist_id"]):
+            self.save_playlist_states()
+            self.refresh_remembered_playlist_list()
+            self.log_to_overview(f" 已移除播放清單記錄: {row['title']}")
 
     def create_path_group(self) -> QGroupBox:
         group = QGroupBox("下載路徑")
@@ -1579,6 +1833,19 @@ class MainWindow(QMainWindow):
         self.check_all_playlist_btn = QPushButton(" 檢查所有播放清單")
         self.check_all_playlist_btn.clicked.connect(self.manual_check_all_playlists)
         layout.addWidget(self.check_all_playlist_btn)
+
+        self.batch_check_progress_bar = QProgressBar()
+        self.batch_check_progress_bar.setVisible(False)
+        layout.addWidget(self.batch_check_progress_bar)
+
+        self.batch_check_status_label = QLabel("")
+        self.batch_check_status_label.setVisible(False)
+        layout.addWidget(self.batch_check_status_label)
+
+        self.cancel_check_all_btn = QPushButton("取消檢查")
+        self.cancel_check_all_btn.clicked.connect(self.cancel_batch_check)
+        self.cancel_check_all_btn.setVisible(False)
+        layout.addWidget(self.cancel_check_all_btn)
 
         widget.setLayout(layout)
         return widget
@@ -1836,6 +2103,7 @@ class MainWindow(QMainWindow):
             )
             self.save_download_history()
         self.save_playlist_states()
+        self.refresh_remembered_playlist_list()
 
     def _prompt_missing_playlist_path(self, playlist_title: str, old_path: str) -> str | None:
         """當播放清單的下載路徑不存在時，詢問使用者選擇新路徑。回傳選擇的路徑，或 None 表示取消。"""
@@ -2068,7 +2336,7 @@ class MainWindow(QMainWindow):
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             return None
 
-    def _keep_worker_alive(self, worker: AsyncWorker):
+    def _keep_worker_alive(self, worker: Any):
         """保持 worker 引用，防止被 GC 回收；完成後自動清除。"""
         self._async_workers = getattr(self, "_async_workers", [])
         self._async_workers.append(worker)
@@ -2137,6 +2405,7 @@ class MainWindow(QMainWindow):
             "playlist_title": playlist_title,
             "playlist_id": playlist_id_tmp,
             "playlist_url": playlist_url,
+            "download_path": normalized_path,
         }
 
         if normalized_path and not os.path.isdir(normalized_path):
@@ -2148,6 +2417,7 @@ class MainWindow(QMainWindow):
             old_normalized = normalized_path
             download_path = chosen
             normalized_path = self.normalize_path(download_path)
+            base_result["download_path"] = normalized_path
             self._migrate_playlist_path(old_normalized, normalized_path, playlist_id_tmp)
         elif self.should_prompt_for_ui_path_change(normalized_path, ui_path, compare_with_ui_path):
             if not allow_path_prompts:
@@ -2159,6 +2429,7 @@ class MainWindow(QMainWindow):
                 old_normalized = normalized_path
                 download_path = chosen
                 normalized_path = self.normalize_path(download_path)
+                base_result["download_path"] = normalized_path
                 self._migrate_playlist_path(old_normalized, normalized_path, playlist_id_tmp)
 
         if not metadata:
@@ -2356,7 +2627,60 @@ class MainWindow(QMainWindow):
                     )
         return playlist_jobs
 
+    def set_batch_check_running(self, running: bool, total: int = 0):
+        if hasattr(self, "check_all_playlist_btn"):
+            self.check_all_playlist_btn.setEnabled(not running)
+        if hasattr(self, "batch_check_progress_bar"):
+            self.batch_check_progress_bar.setVisible(running)
+            self.batch_check_progress_bar.setMaximum(max(total, 1))
+            self.batch_check_progress_bar.setValue(0)
+        if hasattr(self, "batch_check_status_label"):
+            self.batch_check_status_label.setVisible(running)
+            self.batch_check_status_label.setText("準備檢查..." if running else "")
+        if hasattr(self, "cancel_check_all_btn"):
+            self.cancel_check_all_btn.setVisible(running)
+            self.cancel_check_all_btn.setEnabled(running)
+
+    def update_batch_check_progress(self, current: int, total: int, title: str):
+        if hasattr(self, "batch_check_progress_bar"):
+            self.batch_check_progress_bar.setMaximum(max(total, 1))
+            self.batch_check_progress_bar.setValue(current)
+        if hasattr(self, "batch_check_status_label"):
+            self.batch_check_status_label.setText(f"檢查 {current}/{total}: {title}")
+        self.statusBar().showMessage(f"批次檢查 {current}/{total}: {title}")
+
+    def cancel_batch_check(self):
+        if not self.batch_check_worker or not self.batch_check_worker.isRunning():
+            return
+        self.batch_check_worker.cancel()
+        if hasattr(self, "cancel_check_all_btn"):
+            self.cancel_check_all_btn.setEnabled(False)
+            self.cancel_check_all_btn.setText("正在取消...")
+        if hasattr(self, "batch_check_status_label"):
+            self.batch_check_status_label.setText("正在取消，等待目前清單完成...")
+        self.statusBar().showMessage("正在取消批次檢查...")
+        self.log_to_overview(" 已要求取消批次檢查")
+
+    def finish_batch_check_ui(self):
+        if hasattr(self, "check_all_playlist_btn"):
+            self.check_all_playlist_btn.setEnabled(True)
+        if hasattr(self, "batch_check_progress_bar"):
+            self.batch_check_progress_bar.setVisible(False)
+        if hasattr(self, "batch_check_status_label"):
+            self.batch_check_status_label.setVisible(False)
+            self.batch_check_status_label.setText("")
+        if hasattr(self, "cancel_check_all_btn"):
+            self.cancel_check_all_btn.setVisible(False)
+            self.cancel_check_all_btn.setEnabled(True)
+            self.cancel_check_all_btn.setText("取消檢查")
+        self.batch_check_worker = None
+
     def check_all_playlists(self, manual_trigger: bool, show_no_change_message: bool):
+        if self.batch_check_worker and self.batch_check_worker.isRunning():
+            if manual_trigger:
+                QMessageBox.information(self, "播放清單檢查", "批次檢查正在進行中。")
+            return
+
         playlist_jobs = self.collect_known_playlists()
         if not playlist_jobs:
             if manual_trigger:
@@ -2365,17 +2689,12 @@ class MainWindow(QMainWindow):
 
         self.log_to_overview(f" 開始批次檢查 {len(playlist_jobs)} 個播放清單...")
         self.statusBar().showMessage(f"批次檢查 {len(playlist_jobs)} 個播放清單中...")
+        self.set_batch_check_running(True, len(playlist_jobs))
 
-        def fetch_all():
-            results = []
-            for job in playlist_jobs:
-                metadata = self.fetch_playlist_metadata(job["playlist_url"])
-                results.append((job, metadata))
-            return results
+        worker = PlaylistBatchCheckWorker(playlist_jobs, self.fetch_playlist_metadata)
+        self.batch_check_worker = worker
 
-        worker = AsyncWorker(fetch_all)
-
-        def on_done(results):
+        def on_done(results, cancelled):
             self.statusBar().clearMessage()
             processed_results = []
             for job, metadata in results:
@@ -2396,16 +2715,30 @@ class MainWindow(QMainWindow):
                 result.setdefault("playlist_title", job_title)
                 result.setdefault("playlist_id", job["playlist_id"])
                 result.setdefault("playlist_url", job["playlist_url"])
+                result.setdefault("download_path", job["download_path"])
                 processed_results.append(result)
+
+            if cancelled:
+                append_cancelled_playlist_results(playlist_jobs, processed_results)
 
             summary = summarize_playlist_check_results(processed_results)
             self.log_to_overview(summary["message"])
+            self.finish_batch_check_ui()
+            self.refresh_remembered_playlist_list()
 
             if manual_trigger:
                 QMessageBox.information(self, "播放清單檢查", summary["message"])
 
-        worker.finished.connect(on_done)
-        worker.error.connect(lambda e: self.log_to_overview(f" 批次檢查失敗: {e}"))
+        def on_error(error_message):
+            self.statusBar().clearMessage()
+            self.log_to_overview(f" 批次檢查失敗: {error_message}")
+            self.finish_batch_check_ui()
+            if manual_trigger:
+                QMessageBox.warning(self, "播放清單檢查", f"批次檢查失敗:\n{error_message}")
+
+        worker.progress_update.connect(self.update_batch_check_progress)
+        worker.batch_finished.connect(on_done)
+        worker.error.connect(on_error)
         self._keep_worker_alive(worker)
         worker.start()
 
@@ -2684,6 +3017,7 @@ A: 確認 URL 正確無誤，嘗試重新下載。
             state["playlist_title"] = playlist_title
         self.playlist_states[download_path][playlist_id] = state
         self.save_playlist_states()
+        self.refresh_remembered_playlist_list()
 
     def add_to_download_history(self, download_path: str, video_id: str, url: str, title: str = ""):
         download_path = self.normalize_path(download_path)
@@ -2766,6 +3100,9 @@ A: 確認 URL 正確無誤，嘗試重新下載。
         self.settings.setValue("remember_playlist", self.remember_playlist_check.isChecked())
 
     def closeEvent(self, event):
+        if self.batch_check_worker and self.batch_check_worker.isRunning():
+            self.batch_check_worker.cancel()
+            self.batch_check_worker.wait(1000)
         for worker in self.workers:
             if worker.isRunning():
                 worker.stop()

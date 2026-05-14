@@ -1064,6 +1064,107 @@ class TestStateAndReportHelpers:
         assert "C 清單" in summary["message"]
 
 
+class TestRememberedPlaylistManagementHelpers:
+    """測試已記住播放清單管理 helper。"""
+
+    def test_build_remembered_playlist_rows_sorts_and_formats_rows(self):
+        """管理 UI 使用的清單資料應包含標題、路徑、影片數與顯示文字。"""
+        from video_downloader import build_remembered_playlist_rows
+
+        rows = build_remembered_playlist_rows(
+            {
+                "/downloads/b": {
+                    "pl-b": {
+                        "playlist_title": "B 清單",
+                        "playlist_url": "https://example.test/b",
+                        "video_ids": ["b1"],
+                        "last_checked": "2026-05-14T09:00:00",
+                    }
+                },
+                "/downloads/a": {
+                    "pl-a": {
+                        "playlist_title": "A 清單",
+                        "playlist_url": "https://example.test/a",
+                        "video_ids": ["a1", "a2"],
+                        "last_checked": "2026-05-14T10:00:00",
+                    }
+                },
+            }
+        )
+
+        assert [row["playlist_id"] for row in rows] == ["pl-a", "pl-b"]
+        assert rows[0]["title"] == "A 清單"
+        assert rows[0]["video_count"] == 2
+        assert rows[0]["download_path"] == "/downloads/a"
+        assert rows[0]["playlist_url"] == "https://example.test/a"
+        assert "A 清單" in rows[0]["display"]
+        assert "2 部" in rows[0]["display"]
+
+    def test_remove_remembered_playlist_removes_empty_path_bucket(self):
+        """移除已記住播放清單時，空路徑 bucket 應一併清掉。"""
+        from video_downloader import remove_remembered_playlist
+
+        playlist_states = {
+            "/downloads/a": {"pl-a": {"playlist_title": "A"}},
+            "/downloads/b": {"pl-b": {"playlist_title": "B"}},
+        }
+
+        assert remove_remembered_playlist(playlist_states, "/downloads/a", "pl-a") is True
+        assert "/downloads/a" not in playlist_states
+        assert "pl-b" in playlist_states["/downloads/b"]
+        assert remove_remembered_playlist(playlist_states, "/downloads/missing", "pl-x") is False
+
+
+class TestPlaylistBatchCheckHelpers:
+    """測試批次檢查所有清單的進度與取消 helper。"""
+
+    def test_fetch_playlist_batch_metadata_reports_progress_and_stops_after_cancel(self):
+        """取消旗標出現後，批次抓取應停止處理剩餘清單並回報 cancelled。"""
+        from video_downloader import fetch_playlist_batch_metadata
+
+        jobs = [
+            {"playlist_id": "a", "playlist_url": "https://example.test/a", "playlist_title": "A"},
+            {"playlist_id": "b", "playlist_url": "https://example.test/b", "playlist_title": "B"},
+            {"playlist_id": "c", "playlist_url": "https://example.test/c", "playlist_title": "C"},
+        ]
+        fetched_urls = []
+        progress = []
+
+        def fetch_metadata(url):
+            fetched_urls.append(url)
+            return {"id": url.rsplit("/", 1)[-1], "entries": [{"id": "v1", "title": "Video"}]}
+
+        results, cancelled = fetch_playlist_batch_metadata(
+            jobs,
+            fetch_metadata,
+            should_cancel=lambda: len(fetched_urls) >= 1,
+            on_progress=lambda current, total, title: progress.append((current, total, title)),
+        )
+
+        assert cancelled is True
+        assert fetched_urls == ["https://example.test/a"]
+        assert len(results) == 1
+        assert progress == [(1, 3, "A")]
+
+    def test_append_cancelled_playlist_results_marks_unprocessed_jobs(self):
+        """批次取消時，尚未處理的清單應進入摘要的 cancel 統計。"""
+        from video_downloader import append_cancelled_playlist_results, summarize_playlist_check_results
+
+        jobs = [
+            {"download_path": "/downloads", "playlist_id": "a", "playlist_url": "https://example.test/a"},
+            {"download_path": "/downloads", "playlist_id": "b", "playlist_url": "https://example.test/b"},
+        ]
+        processed_results = [{"status": "no-change", "playlist_id": "a", "download_path": "/downloads"}]
+
+        append_cancelled_playlist_results(jobs, processed_results)
+        summary = summarize_playlist_check_results(processed_results)
+
+        assert processed_results[1]["status"] == "cancel"
+        assert processed_results[1]["playlist_id"] == "b"
+        assert summary["cancelled"] == 1
+        assert summary["no_change"] == 1
+
+
 class TestStatusColors:
     """測試狀態顏色定義"""
 
