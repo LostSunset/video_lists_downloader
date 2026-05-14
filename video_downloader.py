@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.9.1"
+APP_VERSION = "v0.9.2"
 
 
 # ==================== 狀態顏色定義 ====================

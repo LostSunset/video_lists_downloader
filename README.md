@@ -23,7 +23,7 @@ uv sync
 # 或 pip install PySide6 yt-dlp
 
 # 2. 執行
-python video_downloader.py
+uv run python video_downloader.py
 ```
 
 **三步驟開始下載：**
@@ -57,6 +57,8 @@ python video_downloader.py
 - [完整使用說明](docs/user_guide.md)
 - [常見問題 (FAQ)](docs/faq.md)
 - [疑難排解](docs/troubleshooting.md)
+- [開發者日誌](docs/developer_log.md)
+- [研究目標與日誌](docs/research_log.md)
 
 ### 環境需求
 
@@ -69,13 +71,13 @@ python video_downloader.py
 
 ```bash
 # 安裝開發依賴
-pip install -e ".[dev]"
+uv sync --extra dev
 
 # 執行測試
-pytest
+uv run pytest -v
 
 # 程式碼檢查
-ruff check .
+uv run ruff check .
 ```
 
 ---
@@ -90,7 +92,7 @@ uv sync
 # or: pip install PySide6 yt-dlp
 
 # 2. Run
-python video_downloader.py
+uv run python video_downloader.py
 ```
 
 **Three steps to start downloading:**
@@ -124,6 +126,8 @@ python video_downloader.py
 - [User Guide](docs/user_guide.md)
 - [FAQ](docs/faq.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [Developer Log](docs/developer_log.md)
+- [Research Goals and Log](docs/research_log.md)
 
 ### Requirements
 
@@ -136,13 +140,13 @@ python video_downloader.py
 
 ```bash
 # Install dev dependencies
-pip install -e ".[dev]"
+uv sync --extra dev
 
 # Run tests
-pytest
+uv run pytest -v
 
 # Lint
-ruff check .
+uv run ruff check .
 ```
 
 ---
@@ -150,6 +154,11 @@ ruff check .
 ## 版本歷史 | Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
+
+### v0.9.2 (2026-05-14)
+- 📝 新增開發者日誌、SESSION 範本與研究日誌，讓 Codex/Claude Code 能依規則記錄維護工作
+- 🔒 新增 GitHub 分支保護與自動推送規則文件，要求非 admin 開發者透過 PR
+- 🔧 同步 `AGENTS.md` 與 `CLAUDE.md`，並將 `uv.lock` 對齊目前版本
 
 ### v0.9.1 (2026-03-24)
 - 🐛 修正批次檢查時路徑變更對話框不出現的問題（路徑檢查移至 metadata 之前）
