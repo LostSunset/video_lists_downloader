@@ -54,7 +54,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.10.0"
+APP_VERSION = "v0.11.0"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -377,6 +377,28 @@ def append_cancelled_playlist_results(playlist_jobs: list[dict], processed_resul
                 "playlist_title": job.get("playlist_title") or job.get("playlist_id") or "未命名清單",
             }
         )
+
+
+def should_prompt_before_closing_task_tab(tab_index: int, worker_is_running: bool) -> bool:
+    """Return whether closing a task tab should ask before stopping an active worker."""
+    return tab_index > 0 and worker_is_running
+
+
+def build_task_completion_summary(task_id: int, stats: dict) -> str:
+    """Build a stable task completion summary."""
+    return (
+        f"任務 {task_id} 已完成\n\n"
+        f"成功: {int(stats.get('success', 0))}\n"
+        f"失敗: {int(stats.get('failed', 0))}\n"
+        f"跳過: {int(stats.get('skipped', 0))}"
+    )
+
+
+def task_completion_dialog_level(stats: dict) -> str | None:
+    """Only use modal completion notices for tasks that need attention."""
+    if int(stats.get("failed", 0)) > 0:
+        return "warning"
+    return None
 
 
 # ==================== 下載統計 ====================
@@ -1193,6 +1215,7 @@ class MainWindow(QMainWindow):
         self._seen_ids_lock = threading.Lock()
         self._history_lock = threading.Lock()
         self.batch_check_worker: PlaylistBatchCheckWorker | None = None
+        self.suppressed_completion_dialog_task_ids = set()
         self.cookie_manager = CookieManager(self)
         self.settings = QSettings("VideoDownloader", "PySide6App")
 
@@ -2753,6 +2776,7 @@ class MainWindow(QMainWindow):
 
     def create_task(self, task_id: int, urls: list[str], settings: dict):
         task_widget = QWidget()
+        task_widget.setProperty("task_id", task_id)
         task_layout = QVBoxLayout(task_widget)
 
         info_label = QLabel(f"路徑: {settings['download_path']} | 項目: {len(urls)} 個")
@@ -2813,21 +2837,50 @@ class MainWindow(QMainWindow):
         worker.start()
         self.log_to_overview(f" 任務 {task_id} 已啟動")
 
+    def find_worker_for_task(self, task_id: int | None):
+        if task_id is None:
+            return None
+        for worker in self.workers:
+            if getattr(worker, "task_id", None) == task_id:
+                return worker
+        return None
+
     def close_task_tab(self, index: int):
         if index == 0:
             return
+        task_widget = self.task_tabs.widget(index)
+        task_id = task_widget.property("task_id") if task_widget else None
+        worker = self.find_worker_for_task(task_id)
+        worker_is_running = bool(worker and worker.isRunning())
+
+        if should_prompt_before_closing_task_tab(index, worker_is_running):
+            reply = QMessageBox.question(
+                self,
+                "任務仍在執行",
+                f"任務 {task_id} 仍在執行。\n\n要停止任務並關閉分頁嗎？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            self.suppressed_completion_dialog_task_ids.add(task_id)
+            worker.stop()
+            worker.wait(1000)
+
         self.task_tabs.removeTab(index)
 
     def on_task_finished(self, task_id: int, stats: dict):
-        self.log_to_overview(f" 任務 {task_id} 完成")
+        summary = build_task_completion_summary(task_id, stats)
+        self.log_to_overview(
+            f" 任務 {task_id} 完成 - 成功: {stats['success']}, 失敗: {stats['failed']}, 跳過: {stats['skipped']}"
+        )
         self.statusBar().showMessage(
             f"任務 {task_id} 完成 - 成功: {stats['success']}, 失敗: {stats['failed']}, 跳過: {stats['skipped']}"
         )
-        QMessageBox.information(
-            self,
-            "任務完成",
-            f"任務 {task_id} 已完成\n\n成功: {stats['success']}\n失敗: {stats['failed']}\n跳過: {stats['skipped']}",
-        )
+        dialog_level = task_completion_dialog_level(stats)
+        suppress_dialog = task_id in self.suppressed_completion_dialog_task_ids
+        self.suppressed_completion_dialog_task_ids.discard(task_id)
+        if dialog_level == "warning" and not suppress_dialog:
+            QMessageBox.warning(self, "任務完成但有失敗", summary)
 
     def log_to_overview(self, message: str):
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")

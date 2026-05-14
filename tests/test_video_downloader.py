@@ -1165,6 +1165,36 @@ class TestPlaylistBatchCheckHelpers:
         assert summary["no_change"] == 1
 
 
+class TestDownloadTaskUxHelpers:
+    """測試下載任務分頁與完成通知的 UX helper。"""
+
+    def test_should_prompt_before_closing_task_tab_only_for_running_non_overview_tabs(self):
+        """只有執行中的任務分頁關閉時需要提示；總覽或已完成任務不用提示。"""
+        from video_downloader import should_prompt_before_closing_task_tab
+
+        assert should_prompt_before_closing_task_tab(tab_index=0, worker_is_running=True) is False
+        assert should_prompt_before_closing_task_tab(tab_index=1, worker_is_running=False) is False
+        assert should_prompt_before_closing_task_tab(tab_index=1, worker_is_running=True) is True
+
+    def test_task_completion_dialog_level_only_warns_when_failures_exist(self):
+        """純成功任務不應彈窗；有失敗時才用 warning 提醒。"""
+        from video_downloader import task_completion_dialog_level
+
+        assert task_completion_dialog_level({"success": 3, "failed": 0, "skipped": 0}) is None
+        assert task_completion_dialog_level({"success": 2, "failed": 1, "skipped": 0}) == "warning"
+
+    def test_build_task_completion_summary_contains_counts(self):
+        """任務完成摘要應穩定包含成功、失敗與跳過數量。"""
+        from video_downloader import build_task_completion_summary
+
+        summary = build_task_completion_summary(7, {"success": 2, "failed": 1, "skipped": 3})
+
+        assert "任務 7 已完成" in summary
+        assert "成功: 2" in summary
+        assert "失敗: 1" in summary
+        assert "跳過: 3" in summary
+
+
 class TestStatusColors:
     """測試狀態顏色定義"""
 

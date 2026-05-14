@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-05-14
+
+### Added
+- 任務分頁關閉保護：下載任務仍在執行時，關閉分頁會先詢問是否停止任務。
+- 新增下載任務 UX helper 測試，覆蓋關閉提示判斷、完成通知層級與摘要文字。
+
+### Changed
+- 純成功下載任務不再彈出完成對話框，只更新狀態列與總覽 log。
+- 有失敗的任務才彈出 warning 對話框，讓需要注意的結果更明顯。
+- 使用者確認停止並關閉執行中任務分頁時，該任務完成後不再追加完成彈窗。
+
 ## [0.10.0] - 2026-05-14
 
 ### Added

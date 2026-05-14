@@ -13,6 +13,23 @@
 
 ## 版本紀錄
 
+### 2026-05-14 - v0.11.0
+
+- 作者/工具：Codex
+- 類型：feat / ux / test
+- 摘要：
+  - 新增任務分頁關閉保護，下載任務仍在執行時會先詢問是否停止並關閉。
+  - 降低下載完成彈窗干擾：純成功任務只更新狀態列與總覽，有失敗時才彈出 warning。
+  - 使用者已確認停止並關閉分頁的任務，不再於完成時追加彈窗。
+  - 新增下載任務 UX helper 測試與 PySide offscreen smoke 驗證。
+- 驗證：
+  - `uv run ruff check .` 通過。
+  - `uv run python -m py_compile video_downloader.py bin_manager.py` 通過。
+  - `uv run pytest -q` 通過，96 tests passed。
+  - PySide offscreen 任務 UX smoke check 通過。
+- 後續事項：
+  - 可整理既有 mypy 型別債，讓 CI type check 從 continue-on-error 變成正式 gate。
+
 ### 2026-05-14 - v0.10.0
 
 - 作者/工具：Codex
