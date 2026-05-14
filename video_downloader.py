@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import datetime
 import glob
+import html
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -50,7 +52,7 @@ from PySide6.QtWidgets import (
 
 import bin_manager
 
-APP_VERSION = "v0.9.2"
+APP_VERSION = "v0.9.3"
 
 
 # ==================== 狀態顏色定義 ====================
@@ -132,6 +134,171 @@ class CompiledPatterns:
 PATTERNS = CompiledPatterns()
 
 
+def atomic_write_json(file_path: str | os.PathLike[str], data: Any):
+    """Atomically write JSON to avoid leaving a corrupt state file on crash."""
+    target = os.fspath(file_path)
+    target_dir = os.path.dirname(os.path.abspath(target)) or "."
+    os.makedirs(target_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=f".{os.path.basename(target)}.", suffix=".tmp", dir=target_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, target)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def migrate_playlist_state_paths(
+    playlist_states: dict,
+    download_history: dict,
+    old_path: str,
+    new_path: str,
+    playlist_id: str | None = None,
+):
+    """Move playlist state and matching history from one path bucket to another."""
+    if not old_path or not new_path or old_path == new_path:
+        return
+    if old_path not in playlist_states and old_path not in download_history:
+        return
+
+    if playlist_id:
+        playlist_info = playlist_states.get(old_path, {}).pop(playlist_id, None)
+        if not playlist_info:
+            return
+        playlist_states.setdefault(new_path, {})
+        playlist_states[new_path][playlist_id] = playlist_info
+        video_ids = set(playlist_info.get("video_ids", []))
+        if video_ids and old_path in download_history:
+            download_history.setdefault(new_path, {})
+            for video_id in list(download_history[old_path]):
+                if video_id in video_ids:
+                    download_history[new_path][video_id] = download_history[old_path].pop(video_id)
+            if not download_history[old_path]:
+                del download_history[old_path]
+        if old_path in playlist_states and not playlist_states[old_path]:
+            del playlist_states[old_path]
+        return
+
+    if old_path in playlist_states:
+        playlist_states.setdefault(new_path, {}).update(playlist_states.pop(old_path))
+    if old_path in download_history:
+        download_history.setdefault(new_path, {}).update(download_history.pop(old_path))
+
+
+def render_download_report_html(download_history: dict) -> str:
+    """Render an escaped HTML download report."""
+    total_count = sum(len(v) for v in download_history.values())
+    generated_at = html.escape(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>下載歷史報告</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #1e1e1e; color: #d4d4d4; }}
+        h1 {{ color: #0e639c; }}
+        table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
+        th, td {{ padding: 10px; text-align: left; border: 1px solid #3c3c3c; }}
+        th {{ background: #0e639c; color: white; }}
+        tr:nth-child(even) {{ background: #2d2d30; }}
+        tr:hover {{ background: #3c3c3c; }}
+        a {{ color: #3794ff; }}
+        .summary {{ background: #2d2d30; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+    </style>
+</head>
+<body>
+    <h1>📊 下載歷史報告</h1>
+    <div class="summary">
+        <p>📅 產生時間: {generated_at}</p>
+        <p>📁 總路徑數: {len(download_history)}</p>
+        <p>🎬 總影片數: {total_count}</p>
+    </div>
+    <table>
+        <tr>
+            <th>下載路徑</th>
+            <th>影片 ID</th>
+            <th>標題</th>
+            <th>下載時間</th>
+        </tr>
+"""
+
+    for path, videos in download_history.items():
+        safe_path = html.escape(str(path))
+        for video_id, info in videos.items():
+            url = html.escape(str(info.get("url", "")), quote=True)
+            safe_video_id = html.escape(str(video_id))
+            title = html.escape(str(info.get("title", "") or video_id))
+            timestamp = html.escape(str(info.get("timestamp", "")))
+            html_content += f"""        <tr>
+            <td>{safe_path}</td>
+            <td><a href="{url}" target="_blank">{safe_video_id}</a></td>
+            <td>{title}</td>
+            <td>{timestamp}</td>
+        </tr>
+"""
+
+    html_content += """    </table>
+</body>
+</html>"""
+    return html_content
+
+
+def summarize_playlist_check_results(results: list[dict]) -> dict:
+    """Build a human-readable summary for batch playlist checks."""
+    summary = {
+        "total": len(results),
+        "changed": 0,
+        "no_change": 0,
+        "failed": 0,
+        "cancelled": 0,
+        "message": "",
+    }
+    changed_titles = []
+    failed_titles = []
+    cancelled_titles = []
+
+    for result in results:
+        status = result.get("status")
+        title = result.get("playlist_title") or result.get("playlist_id") or result.get("playlist_url") or "未命名清單"
+        if status in ("proceed", "manual"):
+            summary["changed"] += 1
+            changed_titles.append(str(title))
+        elif status == "no-change":
+            summary["no_change"] += 1
+        elif status == "cancel":
+            summary["cancelled"] += 1
+            cancelled_titles.append(str(title))
+        else:
+            summary["failed"] += 1
+            reason = result.get("reason", "unknown")
+            failed_titles.append(f"{title} ({reason})")
+
+    lines = [
+        f"批次檢查完成，共 {summary['total']} 個播放清單。",
+        f"有變動: {summary['changed']} 個",
+        f"無變動: {summary['no_change']} 個",
+        f"失敗: {summary['failed']} 個",
+        f"已取消/略過: {summary['cancelled']} 個",
+    ]
+    if changed_titles:
+        lines.append("\n有變動清單:")
+        lines.extend(f"- {title}" for title in changed_titles)
+    if failed_titles:
+        lines.append("\n失敗清單:")
+        lines.extend(f"- {title}" for title in failed_titles)
+    if cancelled_titles:
+        lines.append("\n已取消/略過清單:")
+        lines.extend(f"- {title}" for title in cancelled_titles)
+    summary["message"] = "\n".join(lines)
+    return summary
+
+
 # ==================== 下載統計 ====================
 @dataclass
 class DownloadStats:
@@ -201,6 +368,14 @@ class PlatformUtils:
             return "bilibili"
         else:
             return "unknown"
+
+    @staticmethod
+    def resolve_platform(url: str, selected_platform: str = "auto") -> str:
+        """解析平台；使用者手動選擇時優先於 URL 自動偵測。"""
+        selected = (selected_platform or "auto").strip().lower()
+        if selected in {"youtube", "bilibili"}:
+            return selected
+        return PlatformUtils.detect_platform(url)
 
     @staticmethod
     def extract_video_id(url: str) -> str:
@@ -641,7 +816,7 @@ class BatchDownloadWorker(QThread):
                 self.status_change.emit(f"下載 {idx}/{len(self.urls)}")
                 self.progress_update.emit(idx)
 
-                platform = PlatformUtils.detect_platform(url)
+                platform = self._resolve_platform(url)
                 video_id = PlatformUtils.extract_video_id(url)
                 self.log_message.emit(f"\n [{idx}/{len(self.urls)}] {url}")
                 self.log_message.emit(f" 平台: {platform}, ID: {video_id}")
@@ -683,6 +858,10 @@ class BatchDownloadWorker(QThread):
             self.log_message.emit(f" 任務錯誤: {str(e)}")
             traceback.print_exc()
 
+    def _resolve_platform(self, url: str) -> str:
+        """解析下載平台，尊重 UI 的手動平台選擇。"""
+        return PlatformUtils.resolve_platform(url, self.settings.get("platform", "auto"))
+
     def _download_single(self, url: str, platform: str) -> bool:
         """下載單一影片"""
         try:
@@ -691,60 +870,75 @@ class BatchDownloadWorker(QThread):
 
             timeout = self.settings.get("download_timeout", CONSTANTS.DEFAULT_TIMEOUT)
 
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=self.settings.get("download_path"),
-                bufsize=1,
-                env=bin_manager.get_ytdlp_env(),
-            )
+            success = self._run_ytdlp_command(cmd, timeout)
+            if success:
+                return True
 
-            last_progress = ""
-            has_successful_download = False
-            try:
-                for line in iter(process.stdout.readline, ""):
-                    if not self._is_running:
-                        process.terminate()
-                        break
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if "[download]" in line:
-                        progress_info = self._parse_progress(line)
-                        if progress_info and progress_info != last_progress:
-                            self.download_progress.emit(progress_info)
-                            last_progress = progress_info
-                        # 偵測下載完成的標記
-                        if "has already been downloaded" in line or "100%" in line:
-                            has_successful_download = True
-                    elif "ERROR" in line or "WARNING" in line:
-                        self.log_message.emit(f" {line}")
-                    elif "[Merger]" in line or "Deleting original file" in line:
-                        has_successful_download = True
-
-                process.stdout.close()
-                return_code = process.wait(timeout=timeout if timeout > 0 else None)
-                # 播放清單中部分影片失敗（如被刪除）時 yt-dlp 回傳非零，
-                # 但只要有任何影片成功下載就視為成功
-                success = return_code == 0 or has_successful_download
-                if not success:
-                    self._cleanup_partial_files()
-                return success
-
-            except subprocess.TimeoutExpired:
-                process.kill()
-                self.log_message.emit(" 下載超時")
-                self._cleanup_partial_files()
-                return False
+            if self._command_uses_browser_cookies(cmd):
+                self.log_message.emit(" 瀏覽器 Cookie 無法使用，改用無 Cookie 重試...")
+                retry_cmd = self._build_ytdlp_command(url, platform, disable_cookies=True)
+                return self._run_ytdlp_command(retry_cmd, timeout)
+            return False
 
         except (OSError, subprocess.SubprocessError) as e:
             self.log_message.emit(f" 錯誤: {str(e)}")
             self._cleanup_partial_files()
             return False
+
+    def _run_ytdlp_command(self, cmd: list[str], timeout: int) -> bool:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=self.settings.get("download_path"),
+            bufsize=1,
+            env=bin_manager.get_ytdlp_env(),
+        )
+
+        last_progress = ""
+        has_successful_download = False
+        try:
+            for line in iter(process.stdout.readline, ""):
+                if not self._is_running:
+                    process.terminate()
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                if "[download]" in line:
+                    progress_info = self._parse_progress(line)
+                    if progress_info and progress_info != last_progress:
+                        self.download_progress.emit(progress_info)
+                        last_progress = progress_info
+                    # 偵測下載完成的標記
+                    if "has already been downloaded" in line or "100%" in line:
+                        has_successful_download = True
+                elif "ERROR" in line or "WARNING" in line:
+                    self.log_message.emit(f" {line}")
+                elif "[Merger]" in line or "Deleting original file" in line:
+                    has_successful_download = True
+
+            process.stdout.close()
+            return_code = process.wait(timeout=timeout if timeout > 0 else None)
+            # 播放清單中部分影片失敗（如被刪除）時 yt-dlp 回傳非零，
+            # 但只要有任何影片成功下載就視為成功
+            success = return_code == 0 or has_successful_download
+            if not success:
+                self._cleanup_partial_files()
+            return success
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            self.log_message.emit(" 下載超時")
+            self._cleanup_partial_files()
+            return False
+
+    @staticmethod
+    def _command_uses_browser_cookies(cmd: list[str]) -> bool:
+        return "--cookies-from-browser" in cmd
 
     def _cleanup_partial_files(self):
         """清理下載失敗後殘留的不完整檔案（.part, .ytdl, .temp 等）"""
@@ -791,11 +985,11 @@ class BatchDownloadWorker(QThread):
             pass
         return ""
 
-    def _build_ytdlp_command(self, url: str, platform: str) -> list[str]:
+    def _build_ytdlp_command(self, url: str, platform: str, disable_cookies: bool = False) -> list[str]:
         """建構 yt-dlp 指令"""
         cmd = bin_manager.get_base_ytdlp_cmd()
 
-        if self.settings.get("use_cookies"):
+        if self.settings.get("use_cookies") and not disable_cookies:
             cookie_file = self.settings.get(f"{platform}_cookie_file")
             if cookie_file and os.path.exists(cookie_file):
                 cmd.extend(["--cookies", cookie_file])
@@ -913,6 +1107,10 @@ class MainWindow(QMainWindow):
         if not path:
             return ""
         return os.path.normcase(os.path.abspath(os.path.normpath(path)))
+
+    @staticmethod
+    def should_prompt_for_ui_path_change(normalized_path: str, ui_path: str, compare_with_ui_path: bool = True) -> bool:
+        return bool(compare_with_ui_path and normalized_path and ui_path and normalized_path != ui_path)
 
     def init_ui(self):
         # 啟用拖放
@@ -1624,17 +1822,20 @@ class MainWindow(QMainWindow):
         else:
             return None
 
-    def _migrate_playlist_path(self, old_normalized: str, new_normalized: str):
+    def _migrate_playlist_path(self, old_normalized: str, new_normalized: str, playlist_id: str | None = None):
         """將播放清單狀態與下載歷史從舊路徑遷移到新路徑。"""
         if old_normalized == new_normalized:
             return
-        if old_normalized in self.playlist_states:
-            self.playlist_states.setdefault(new_normalized, {}).update(self.playlist_states.pop(old_normalized))
-            self.save_playlist_states()
         with self._history_lock:
-            if old_normalized in self.download_history:
-                self.download_history.setdefault(new_normalized, {}).update(self.download_history.pop(old_normalized))
-                self.save_download_history()
+            migrate_playlist_state_paths(
+                self.playlist_states,
+                self.download_history,
+                old_normalized,
+                new_normalized,
+                playlist_id=playlist_id,
+            )
+            self.save_download_history()
+        self.save_playlist_states()
 
     def _prompt_missing_playlist_path(self, playlist_title: str, old_path: str) -> str | None:
         """當播放清單的下載路徑不存在時，詢問使用者選擇新路徑。回傳選擇的路徑，或 None 表示取消。"""
@@ -1724,8 +1925,11 @@ class MainWindow(QMainWindow):
         if not os.path.isdir(normalized_path):
             QMessageBox.warning(self, "警告", f"下載路徑不存在:\n{download_path}")
             return None
+        selected_platform_id = self.platform_buttons.checkedId()
+        platform = {0: "youtube", 1: "bilibili"}.get(selected_platform_id, "auto")
         return {
             "download_path": normalized_path,
+            "platform": platform,
             "use_cookies": self.use_cookies_check.isChecked(),
             "youtube_cookie_file": self.youtube_cookie_file,
             "bilibili_cookie_file": self.bilibili_cookie_file,
@@ -1920,45 +2124,55 @@ class MainWindow(QMainWindow):
         show_no_change_message: bool = True,
         offer_auto_download: bool = True,
         remember: bool = True,
+        compare_with_ui_path: bool = True,
+        allow_path_prompts: bool = True,
     ) -> dict:
         """處理播放清單偵測邏輯（純 UI + 本地資料，在主執行緒呼叫）。"""
         # 先檢查下載路徑（不依賴 metadata，即使抓取失敗也能處理路徑問題）
         normalized_path = self.normalize_path(download_path)
-        playlist_title = (metadata.get("title", "") if metadata else "") or download_path
+        playlist_id_tmp = (metadata.get("id") if metadata else None) or PlatformUtils.extract_playlist_id(playlist_url)
+        playlist_title = (metadata.get("title", "") if metadata else "") or playlist_id_tmp or download_path
         ui_path = self.normalize_path(self.download_path_edit.text())
+        base_result = {
+            "playlist_title": playlist_title,
+            "playlist_id": playlist_id_tmp,
+            "playlist_url": playlist_url,
+        }
 
         if normalized_path and not os.path.isdir(normalized_path):
+            if not allow_path_prompts:
+                return {**base_result, "status": "error", "reason": "path-missing"}
             chosen = self._prompt_missing_playlist_path(playlist_title, download_path)
             if chosen is None:
-                return {"status": "cancel"}
+                return {**base_result, "status": "cancel"}
             old_normalized = normalized_path
             download_path = chosen
             normalized_path = self.normalize_path(download_path)
-            self._migrate_playlist_path(old_normalized, normalized_path)
-        elif normalized_path and ui_path and normalized_path != ui_path:
-            playlist_id_tmp = (metadata.get("id") if metadata else None) or PlatformUtils.extract_playlist_id(
-                playlist_url
-            )
+            self._migrate_playlist_path(old_normalized, normalized_path, playlist_id_tmp)
+        elif self.should_prompt_for_ui_path_change(normalized_path, ui_path, compare_with_ui_path):
+            if not allow_path_prompts:
+                return {**base_result, "status": "error", "reason": "path-changed"}
             chosen = self._prompt_playlist_path_change(playlist_title, playlist_id_tmp, normalized_path, ui_path)
             if chosen is None:
-                return {"status": "cancel"}
+                return {**base_result, "status": "cancel"}
             if self.normalize_path(chosen) != normalized_path:
                 old_normalized = normalized_path
                 download_path = chosen
                 normalized_path = self.normalize_path(download_path)
-                self._migrate_playlist_path(old_normalized, normalized_path)
+                self._migrate_playlist_path(old_normalized, normalized_path, playlist_id_tmp)
 
         if not metadata:
-            return {"status": "error", "reason": "fetch-failed"}
+            return {**base_result, "status": "error", "reason": "fetch-failed"}
 
         entries = metadata.get("entries") or []
         if not entries:
-            return {"status": "error", "reason": "empty"}
+            return {**base_result, "status": "error", "reason": "empty"}
 
         unavailable_titles = {"[deleted video]", "[private video]"}
         available_entries = [e for e in entries if (e.get("title") or "").strip().lower() not in unavailable_titles]
 
         playlist_id = metadata.get("id") or PlatformUtils.extract_playlist_id(playlist_url)
+        base_result["playlist_id"] = playlist_id
         current_ids = [e.get("id") or e.get("url") for e in available_entries if e.get("id") or e.get("url")]
 
         prev_state = self.playlist_states.get(normalized_path, {}).get(playlist_id, {})
@@ -1983,7 +2197,7 @@ class MainWindow(QMainWindow):
                 )
             if manual_trigger and show_no_change_message:
                 QMessageBox.information(self, "偵測結果", f"{title_prefix}播放清單沒有新影片。")
-            return {"status": "no-change", "video_ids": current_ids}
+            return {**base_result, "status": "no-change", "video_ids": current_ids}
 
         msg_parts = []
         if added_videos:
@@ -2000,7 +2214,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
-                return {"status": "cancel"}
+                return {**base_result, "status": "cancel"}
 
         if remember:
             self.update_playlist_state(
@@ -2029,6 +2243,7 @@ class MainWindow(QMainWindow):
                 self.auto_download_playlist(playlist_url, normalized_path)
 
         return {
+            **base_result,
             "status": "proceed" if not manual_trigger else "manual",
             "added_videos": added_videos,
             "missing_videos": missing_videos,
@@ -2162,7 +2377,7 @@ class MainWindow(QMainWindow):
 
         def on_done(results):
             self.statusBar().clearMessage()
-            updates_found = 0
+            processed_results = []
             for job, metadata in results:
                 job_title = job.get("playlist_title") or job["playlist_id"]
                 self.log_to_overview(f"  處理中: {job_title}")
@@ -2170,18 +2385,24 @@ class MainWindow(QMainWindow):
                     job["playlist_url"],
                     job["download_path"],
                     metadata,
-                    prompt_user=True,
+                    prompt_user=False,
                     manual_trigger=manual_trigger,
-                    show_no_change_message=show_no_change_message,
+                    show_no_change_message=False,
+                    offer_auto_download=False,
                     remember=True,
+                    compare_with_ui_path=False,
+                    allow_path_prompts=False,
                 )
-                if result.get("status") in ("proceed", "manual"):
-                    updates_found += 1
+                result.setdefault("playlist_title", job_title)
+                result.setdefault("playlist_id", job["playlist_id"])
+                result.setdefault("playlist_url", job["playlist_url"])
+                processed_results.append(result)
+
+            summary = summarize_playlist_check_results(processed_results)
+            self.log_to_overview(summary["message"])
 
             if manual_trigger:
-                QMessageBox.information(
-                    self, "播放清單檢查", f"批次檢查完成，共偵測到 {updates_found} 個播放清單有變動。"
-                )
+                QMessageBox.information(self, "播放清單檢查", summary["message"])
 
         worker.finished.connect(on_done)
         worker.error.connect(lambda e: self.log_to_overview(f" 批次檢查失敗: {e}"))
@@ -2379,60 +2600,8 @@ A: 確認 URL 正確無誤，嘗試重新下載。
 
     def _export_html(self, file_path: str):
         """匯出 HTML 格式報告"""
-        total_count = sum(len(v) for v in self.download_history.values())
-
-        html_content = f"""<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <title>下載歷史報告</title>
-    <style>
-        body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #1e1e1e; color: #d4d4d4; }}
-        h1 {{ color: #0e639c; }}
-        table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-        th, td {{ padding: 10px; text-align: left; border: 1px solid #3c3c3c; }}
-        th {{ background: #0e639c; color: white; }}
-        tr:nth-child(even) {{ background: #2d2d30; }}
-        tr:hover {{ background: #3c3c3c; }}
-        a {{ color: #3794ff; }}
-        .summary {{ background: #2d2d30; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
-    </style>
-</head>
-<body>
-    <h1>📊 下載歷史報告</h1>
-    <div class="summary">
-        <p>📅 產生時間: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
-        <p>📁 總路徑數: {len(self.download_history)}</p>
-        <p>🎬 總影片數: {total_count}</p>
-    </div>
-    <table>
-        <tr>
-            <th>下載路徑</th>
-            <th>影片 ID</th>
-            <th>標題</th>
-            <th>下載時間</th>
-        </tr>
-"""
-
-        for path, videos in self.download_history.items():
-            for video_id, info in videos.items():
-                url = info.get("url", "")
-                title = info.get("title", "") or video_id
-                timestamp = info.get("timestamp", "")
-                html_content += f"""        <tr>
-            <td>{path}</td>
-            <td><a href="{url}" target="_blank">{video_id}</a></td>
-            <td>{title}</td>
-            <td>{timestamp}</td>
-        </tr>
-"""
-
-        html_content += """    </table>
-</body>
-</html>"""
-
         with open(file_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
+            f.write(render_download_report_html(self.download_history))
 
     def load_download_history(self):
         try:
@@ -2483,15 +2652,13 @@ A: 確認 URL 正確無誤，嘗試重新下載。
 
     def save_download_history(self):
         try:
-            with open(self.download_history_file, "w", encoding="utf-8") as f:
-                json.dump(self.download_history, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self.download_history_file, self.download_history)
         except OSError:
             pass
 
     def save_playlist_states(self):
         try:
-            with open(self.playlist_state_file, "w", encoding="utf-8") as f:
-                json.dump(self.playlist_states, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self.playlist_state_file, self.playlist_states)
         except OSError:
             pass
 

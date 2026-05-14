@@ -155,6 +155,13 @@ uv run ruff check .
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
+### v0.9.3 (2026-05-14)
+- 🐛 修正實際下載時 browser cookie 失敗不會 fallback 無 cookie 重試的問題
+- 🐛 修正平台選擇未真正套用到下載 worker 的問題
+- 🐛 修正批次檢查所有清單時，會用目前 UI 路徑誤觸多個路徑變更提示的問題
+- 🔧 播放清單路徑遷移只搬移指定清單與對應下載歷史，避免影響同路徑其他清單
+- 🔒 HTML 匯出報告會 escape 使用者資料，JSON 狀態儲存改為 atomic write
+
 ### v0.9.2 (2026-05-14)
 - 📝 新增開發者日誌、SESSION 範本與研究日誌，讓 Codex/Claude Code 能依規則記錄維護工作
 - 🔒 新增 GitHub 分支保護與自動推送規則文件，要求非 admin 開發者透過 PR

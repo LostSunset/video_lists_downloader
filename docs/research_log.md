@@ -10,6 +10,24 @@
 
 ## 目前研究目標
 
+### R-2026-05-14-002 - 播放清單批次檢查與下載可靠性
+
+- 狀態：完成
+- 目標：降低批次檢查所有清單與 cookie 下載流程中的錯誤率與 UI 干擾。
+- 背景：使用者檢查所有清單時，既有邏輯會拿目前 UI 路徑與每個已記住清單路徑比較，可能連續跳出多個路徑變更提示；實際下載也缺少 browser cookie 失敗後的無 cookie fallback。
+- 目前結論：
+  - 單一播放清單手動檢查仍可提示路徑變更；批次檢查所有清單應使用各清單自己的記錄路徑並彙總結果。
+  - 平台選擇應由下載設定傳入 worker，手動選擇優先於 URL 偵測。
+  - 路徑遷移應以 playlist 為單位搬移狀態與下載歷史，避免同路徑其他清單受到影響。
+  - 下載與匯出等本地狀態操作需要明確回歸測試，避免 UI-only regression。
+- 驗證方式：
+  - 新增 pytest 回歸測試覆蓋 cookie fallback、平台選擇、批次檢查提示條件、路徑遷移、atomic JSON 與 HTML escaping。
+  - 執行 lint、語法檢查與完整測試。
+- 驗證結果：
+  - `uv run ruff check .` 通過。
+  - `uv run python -m py_compile video_downloader.py bin_manager.py` 通過。
+  - `uv run pytest -q` 通過，89 tests passed。
+
 ### R-2026-05-14-001 - 維護流程與分支保護
 
 - 狀態：完成

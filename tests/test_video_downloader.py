@@ -1,5 +1,7 @@
 """Tests for video_downloader module."""
 
+import io
+import json
 import os
 import sys
 
@@ -160,6 +162,17 @@ class TestPlatformUtils:
         ]
         for url in unknown_urls:
             assert PlatformUtils.detect_platform(url) == "unknown", f"應識別為 unknown: {url}"
+
+    def test_resolve_platform_honors_manual_selection(self):
+        """手動選擇平台時，不應再被 URL 自動偵測覆蓋。"""
+        from video_downloader import PlatformUtils
+
+        youtube_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+        assert PlatformUtils.resolve_platform(youtube_url, "auto") == "youtube"
+        assert PlatformUtils.resolve_platform(youtube_url, "bilibili") == "bilibili"
+        assert PlatformUtils.resolve_platform(youtube_url, "youtube") == "youtube"
+        assert PlatformUtils.resolve_platform(youtube_url, "") == "youtube"
 
     def test_extract_video_id_youtube_watch(self):
         """測試 youtube.com/watch?v=xxx 格式的影片 ID 提取"""
@@ -766,6 +779,65 @@ class TestBatchDownloadWorkerBuildCommand:
         cookie_index = cmd.index("--cookies")
         assert cmd[cookie_index + 1] == str(cookie_file)
 
+    def test_resolve_platform_uses_worker_platform_setting(self):
+        """Batch worker 應尊重 UI 傳入的平台設定。"""
+        from video_downloader import BatchDownloadWorker
+
+        worker = BatchDownloadWorker(
+            task_id=1,
+            urls=["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+            settings={"download_path": "/tmp/downloads", "platform": "bilibili"},
+        )
+
+        assert worker._resolve_platform("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "bilibili"
+
+    def test_download_single_retries_without_browser_cookies_when_browser_cookie_fetch_fails(
+        self, tmp_path, monkeypatch
+    ):
+        """Firefox cookie 讀取失敗時，實際下載應自動重試無 cookie 指令。"""
+        from video_downloader import BatchDownloadWorker
+
+        calls = []
+
+        class FakeProcess:
+            def __init__(self, return_code):
+                self.stdout = io.StringIO("")
+                self.returncode = return_code
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+            def kill(self):
+                self.returncode = -9
+
+            def terminate(self):
+                self.returncode = -15
+
+        processes = [FakeProcess(1), FakeProcess(0)]
+
+        def fake_popen(cmd, **kwargs):
+            calls.append(cmd)
+            return processes.pop(0)
+
+        monkeypatch.setattr("video_downloader.subprocess.Popen", fake_popen)
+
+        worker = BatchDownloadWorker(
+            task_id=1,
+            urls=["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+            settings={
+                "download_path": str(tmp_path),
+                "quality": "best",
+                "use_cookies": True,
+                "youtube_cookie_file": "",
+            },
+        )
+
+        assert worker._download_single("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "youtube") is True
+        assert len(calls) == 2
+        assert "--cookies-from-browser" in calls[0]
+        assert "--cookies-from-browser" not in calls[1]
+        assert "--cookies" not in calls[1]
+
     def test_command_with_output_template(self):
         """測試輸出模板設定"""
         from video_downloader import BatchDownloadWorker
@@ -884,6 +956,112 @@ class TestMainWindowHelpers:
         path3 = MainWindow.normalize_path("/tmp/./downloads")
         assert path1 == path2
         assert path1 == path3
+
+    def test_should_not_prompt_ui_path_change_during_batch_check(self):
+        """批次檢查所有清單時，不應拿目前 UI 路徑去觸發每個清單的路徑變更提示。"""
+        from video_downloader import MainWindow
+
+        old_path = MainWindow.normalize_path("/tmp/old")
+        ui_path = MainWindow.normalize_path("/tmp/current")
+
+        assert MainWindow.should_prompt_for_ui_path_change(old_path, ui_path, compare_with_ui_path=False) is False
+        assert MainWindow.should_prompt_for_ui_path_change(old_path, ui_path, compare_with_ui_path=True) is True
+
+
+class TestStateAndReportHelpers:
+    """測試狀態遷移、JSON 儲存與報告輸出 helper。"""
+
+    def test_migrate_playlist_state_moves_only_requested_playlist_and_its_history(self):
+        """同一路徑多個清單時，只遷移被指定的 playlist。"""
+        from video_downloader import migrate_playlist_state_paths
+
+        old_path = "/downloads/old"
+        new_path = "/downloads/new"
+        playlist_states = {
+            old_path: {
+                "playlist-a": {"video_ids": ["a1", "a2"], "playlist_title": "A"},
+                "playlist-b": {"video_ids": ["b1"], "playlist_title": "B"},
+            }
+        }
+        download_history = {
+            old_path: {
+                "a1": {"url": "https://example.test/a1"},
+                "a2": {"url": "https://example.test/a2"},
+                "b1": {"url": "https://example.test/b1"},
+            }
+        }
+
+        migrate_playlist_state_paths(playlist_states, download_history, old_path, new_path, playlist_id="playlist-a")
+
+        assert "playlist-a" in playlist_states[new_path]
+        assert "playlist-b" in playlist_states[old_path]
+        assert set(download_history[new_path]) == {"a1", "a2"}
+        assert set(download_history[old_path]) == {"b1"}
+
+    def test_migrate_playlist_state_can_move_history_without_playlist_state(self):
+        """整個路徑搬移時，即使沒有 playlist state 也應遷移下載歷史。"""
+        from video_downloader import migrate_playlist_state_paths
+
+        old_path = "/downloads/old"
+        new_path = "/downloads/new"
+        playlist_states = {}
+        download_history = {old_path: {"v1": {"url": "https://example.test/v1"}}}
+
+        migrate_playlist_state_paths(playlist_states, download_history, old_path, new_path)
+
+        assert playlist_states == {}
+        assert download_history == {new_path: {"v1": {"url": "https://example.test/v1"}}}
+
+    def test_atomic_write_json_writes_valid_json(self, tmp_path):
+        """JSON 儲存應透過 atomic write 寫出完整檔案。"""
+        from video_downloader import atomic_write_json
+
+        target = tmp_path / "state.json"
+        atomic_write_json(target, {"name": "測試", "items": [1, 2, 3]})
+
+        assert json.loads(target.read_text(encoding="utf-8")) == {"name": "測試", "items": [1, 2, 3]}
+
+    def test_render_download_report_html_escapes_user_controlled_fields(self):
+        """HTML 報告應 escape 路徑、標題、網址，避免特殊字元破版或插入 HTML。"""
+        from video_downloader import render_download_report_html
+
+        history = {
+            r"C:\Downloads\<unsafe>": {
+                "abc123": {
+                    "url": "https://example.test/watch?v=abc123&x=<bad>",
+                    "title": "<script>alert(1)</script>",
+                    "timestamp": "2026-05-14T10:00:00",
+                }
+            }
+        }
+
+        html = render_download_report_html(history)
+
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+        assert r"C:\Downloads\&lt;unsafe&gt;" in html
+        assert "https://example.test/watch?v=abc123&amp;x=&lt;bad&gt;" in html
+
+    def test_summarize_playlist_check_results_counts_statuses_and_lists_titles(self):
+        """批次檢查摘要應統計變動、失敗、無變動與取消項目。"""
+        from video_downloader import summarize_playlist_check_results
+
+        summary = summarize_playlist_check_results(
+            [
+                {"status": "proceed", "playlist_title": "A 清單"},
+                {"status": "no-change", "playlist_title": "B 清單"},
+                {"status": "error", "playlist_title": "C 清單", "reason": "fetch-failed"},
+                {"status": "cancel", "playlist_title": "D 清單"},
+            ]
+        )
+
+        assert summary["total"] == 4
+        assert summary["changed"] == 1
+        assert summary["no_change"] == 1
+        assert summary["failed"] == 1
+        assert summary["cancelled"] == 1
+        assert "A 清單" in summary["message"]
+        assert "C 清單" in summary["message"]
 
 
 class TestStatusColors:

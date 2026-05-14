@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-05-14
+
+### Fixed
+- 實際下載使用 Firefox/browser cookie 失敗時，會自動改用無 cookie 指令重試。
+- 平台單選 UI 現在會傳入下載 worker，手動選擇 YouTube 或 Bilibili 時不再被 URL 自動偵測覆蓋。
+- 批次檢查所有清單時，不再用目前 UI 路徑逐一觸發舊清單的路徑變更提示。
+- 播放清單路徑遷移現在只搬移指定 playlist 與對應下載歷史，避免誤搬同路徑其他清單。
+- HTML 匯出報告會 escape 路徑、標題與網址，避免特殊字元破版或插入 HTML。
+
+### Changed
+- `download_history.json` 與 `playlist_state.json` 改用 atomic write，降低中斷時寫壞狀態檔的風險。
+- 批次檢查所有清單改為彙總結果訊息，減少逐一彈窗造成的操作干擾。
+- 新增回歸測試覆蓋 cookie fallback、平台選擇、批次檢查摘要、路徑遷移、atomic JSON 與 HTML escaping。
+
 ## [0.9.2] - 2026-05-14
 
 ### Added

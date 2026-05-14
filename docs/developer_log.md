@@ -13,6 +13,23 @@
 
 ## 版本紀錄
 
+### 2026-05-14 - v0.9.3
+
+- 作者/工具：Codex
+- 類型：fix / test
+- 摘要：
+  - 修正實際下載時 browser cookie 失敗後未 fallback 無 cookie 重試的問題。
+  - 修正平台選擇 UI 未套用到下載 worker 的問題。
+  - 將批次檢查所有清單改為彙總結果，避免目前 UI 路徑造成多個播放清單逐一彈出路徑變更提示。
+  - 將播放清單路徑遷移縮小到指定 playlist 與其下載歷史，避免同路徑其他清單被誤搬。
+  - HTML 匯出報告加入 escaping，JSON 狀態檔改用 atomic write。
+- 驗證：
+  - `uv run ruff check .` 通過。
+  - `uv run python -m py_compile video_downloader.py bin_manager.py` 通過。
+  - `uv run pytest -q` 通過，89 tests passed。
+- 後續事項：
+  - 可接續實作已記住播放清單管理 UI、批次檢查進度與取消功能。
+
 ### 2026-05-14 - v0.9.2
 
 - 作者/工具：Codex
